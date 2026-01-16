@@ -1,0 +1,357 @@
+*ical.txt*  Display calendar events from local iCal files
+
+Author: Simon
+License: MIT
+
+==============================================================================
+CONTENTS                                              *ical-contents*
+
+    1. Introduction ............................ |ical-introduction|
+    2. Requirements ............................ |ical-requirements|
+    3. Quick Start ............................. |ical-quickstart|
+    4. Commands ................................ |ical-commands|
+    5. Keymaps ................................. |ical-keymaps|
+    6. Configuration ........................... |ical-configuration|
+    7. Calendar Sources ........................ |ical-sources|
+    8. Views ................................... |ical-views|
+    9. API ..................................... |ical-api|
+
+==============================================================================
+1. INTRODUCTION                                   *ical-introduction*
+
+ical is a Neovim plugin for displaying calendar events and tasks from
+local .ics and .ical files. It supports:
+
+- Multiple calendar sources (files, directories, git repos)
+- Recurring events (RRULE)
+- Tasks/todos (VTODO)
+- Multiple view modes (agenda, daily, weekly, monthly, yearly)
+- Integration with calendar.vim
+
+Perfect for viewing calendars from:
+- Local git repositories syncing calendar data
+- Exported .ics files from Google Calendar, Outlook, etc.
+- CalDAV synced directories (vdirsyncer, etc.)
+
+==============================================================================
+2. REQUIREMENTS                                   *ical-requirements*
+
+- Neovim 0.8+
+- Optional: calendar.vim for visual calendar integration
+
+==============================================================================
+3. QUICK START                                      *ical-quickstart*
+
+1. Add a calendar source: >vim
+    :IcalAddCalendar ~/path/to/calendar.ics MyCalendar
+<
+2. Open the agenda: >vim
+    :IcalAgenda
+<
+3. Navigate with `h`/`l` or `<`/`>`, switch views with `a`/`d`/`w`/`m`/`y`
+
+For persistent configuration, add calendars in your config:
+>lua
+    -- In lua/plugins/calendar.lua
+    opts = {
+      calendars = {
+        { name = "Work", path = "~/calendars/work.ics", color = "#FFD700" },
+        { name = "Personal", path = "~/calendars/personal", color = "#87CEEB" },
+      },
+    }
+<
+==============================================================================
+4. COMMANDS                                           *ical-commands*
+
+View Commands ~
+
+:IcalAgenda [view]                                            *:IcalAgenda*
+    Open the agenda view. Optional [view] argument:
+    `agenda`, `daily`, `weekly`, `monthly`, `yearly`
+
+:IcalDaily                                                      *:IcalDaily*
+    Open the daily view directly.
+
+:IcalWeekly                                                    *:IcalWeekly*
+    Open the weekly view directly.
+
+:IcalMonthly                                                  *:IcalMonthly*
+    Open the monthly view directly.
+
+:IcalYearly                                                    *:IcalYearly*
+    Open the yearly view directly.
+
+:IcalAgendaRefresh                                      *:IcalAgendaRefresh*
+    Refresh the current agenda view.
+
+:IcalAgendaClose                                          *:IcalAgendaClose*
+    Close the agenda window/tab.
+
+Calendar Source Commands ~
+
+:IcalAddCalendar {path} [name] [--recursive]          *:IcalAddCalendar*
+    Add a calendar source at runtime.
+
+    {path}        Path to .ics file or directory (required)
+    [name]        Display name (optional, derived from path)
+    --recursive   Scan subdirectories (for git repos)
+    -r            Short form of --recursive
+
+    Examples: >vim
+        :IcalAddCalendar ~/cal/work.ics Work
+        :IcalAddCalendar ~/repos/calendar-repo GitHub --recursive
+<
+:IcalRemoveCalendar {name}                           *:IcalRemoveCalendar*
+    Remove a calendar source by name or index number.
+
+    Examples: >vim
+        :IcalRemoveCalendar Work
+        :IcalRemoveCalendar 1
+<
+:IcalListCalendars                                      *:IcalListCalendars*
+    List all configured calendar sources with their status.
+    Shows file count and whether recursive scanning is enabled.
+
+Event/Task Creation Commands ~
+
+:IcalNewEvent                                                *:IcalNewEvent*
+    Open a popup form to create a new calendar event.
+    Fields: Title, Date, Start Time, End Time, Location, Description, Calendar
+
+:IcalNewTask                                                  *:IcalNewTask*
+    Open a popup form to create a new task/todo.
+    Fields: Title, Due Date, Due Time, Priority, Description, Calendar
+
+==============================================================================
+5. KEYMAPS                                              *ical-keymaps*
+
+Default keymaps in the agenda buffer:
+
+Navigation ~
+    `h` or `<`      Navigate to previous period
+    `l` or `>`      Navigate to next period
+    `t`             Go to today
+
+View Modes ~
+    `a`             Switch to agenda (list) view
+    `d`             Switch to daily view
+    `w`             Switch to weekly view
+    `m`             Switch to monthly view
+    `y`             Switch to yearly view
+
+Actions ~
+    `r`             Refresh the view
+    `T`             Toggle tasks sidebar
+    `c`             Open calendar.vim
+    `n` or `e`      Create new event (opens form)
+    `N`             Create new task (opens form)
+    `q` or `<Esc>`  Close agenda
+
+Event/Task Form ~
+    `j` / `k`       Navigate between fields
+    `<CR>` or `e`   Edit current field
+    `<Tab>`         Cycle select options / Next field
+    `S` or `<C-s>`  Save and create
+    `q` or `<Esc>`  Cancel
+
+In calendar.vim buffer ~
+    `a`             Open iCal Agenda
+
+Global keymaps (default) ~
+    `<leader>ca`    Open iCal Agenda
+    `<leader>cd`    Open Daily view
+    `<leader>cW`    Open Weekly view
+    `<leader>cm`    Open Monthly view
+    `<leader>ce`    Create new event
+    `<leader>ct`    Create new task
+    `<leader>cc`    Open calendar.vim
+
+==============================================================================
+6. CONFIGURATION                                  *ical-configuration*
+
+Configure in your lazy.nvim plugin spec:
+>lua
+    {
+      dir = vim.fn.stdpath("config") .. "/lua/ical",
+      name = "ical",
+      opts = {
+        -- Calendar sources (see |ical-sources|)
+        calendars = {},
+
+        -- Display options
+        display = {
+          days_ahead = 14,           -- Days to show in agenda view
+          show_tasks = true,         -- Show VTODO items
+          show_completed_tasks = false,
+          show_past_events = false,  -- Show events before today
+          date_format = "%a %b %d",  -- e.g., "Mon Jan 15"
+          time_format = "%H:%M",     -- e.g., "14:30"
+          group_by_date = true,      -- Group events by date
+        },
+
+        -- Window settings
+        window = {
+          width = 60,                -- Minimum content width
+          title = " iCal Agenda ",
+        },
+
+        -- Keymaps (customize or disable)
+        keymaps = {
+          close = { "q", "<Esc>" },
+          refresh = "r",
+          next_week = "<C-d>",       -- Legacy, use h/l now
+          prev_week = "<C-u>",
+          goto_today = "t",
+          toggle_tasks = "T",
+          open_calendar = "c",
+        },
+
+        -- Icons (set to "" to disable)
+        icons = {
+          event = "",
+          task = "☐",
+          task_done = "☑",
+          location = "@",
+          recurring = "↻",
+          all_day = "◷",
+        },
+
+        -- Highlight groups (link to existing groups)
+        highlights = {
+          date_header = "Title",
+          event_time = "Number",
+          event_title = "Normal",
+          event_location = "Comment",
+          today = "CursorLine",
+          task_pending = "Todo",
+          task_completed = "Comment",
+          overdue = "ErrorMsg",
+        },
+
+        -- Auto-refresh
+        refresh = {
+          on_focus = false,  -- Refresh when Neovim gains focus
+          interval = 0,      -- Auto-refresh interval (0 = disabled)
+        },
+      },
+    }
+<
+==============================================================================
+7. CALENDAR SOURCES                                    *ical-sources*
+
+Calendar sources can be:
+
+1. Single .ics/.ical files ~
+>lua
+    { name = "Work", path = "~/calendars/work.ics", color = "#FFD700" }
+<
+2. Directories containing .ics files ~
+>lua
+    { name = "Personal", path = "~/calendars/personal/", color = "#87CEEB" }
+<
+3. Git repositories with recursive scanning ~
+>lua
+    {
+      name = "GitHub Calendar",
+      path = "~/repos/my-calendar-repo",
+      color = "#98FB98",
+      recursive = true,  -- Scan subdirectories
+    }
+<
+Source Options ~
+
+    path        (string, required) Path to file or directory
+    name        (string, optional) Display name
+    color       (string, optional) Hex color for events from this source
+    recursive   (boolean, optional) Scan subdirectories
+
+Common Use Cases ~
+
+vdirsyncer (CalDAV sync): >lua
+    { name = "Google", path = "~/.local/share/vdirsyncer/google/" }
+<
+Exported Google Calendar: >lua
+    { name = "Work", path = "~/Downloads/work@gmail.com.ics" }
+<
+Git-synced calendar repo: >lua
+    { name = "Shared", path = "~/repos/team-calendar", recursive = true }
+<
+==============================================================================
+8. VIEWS                                                  *ical-views*
+
+Agenda View (default) ~
+    List of upcoming events grouped by date.
+    Shows events for the next `days_ahead` days.
+    Navigate by week with `h`/`l`.
+
+Daily View ~
+    Single day view with hourly timeline.
+    All-day events shown separately.
+    Navigate by day with `h`/`l`.
+
+Weekly View ~
+    7-day view starting from Monday.
+    Shows each day with its events.
+    Navigate by week with `h`/`l`.
+
+Monthly View ~
+    Calendar grid for the month.
+    Days with events marked with `*`.
+    Navigate by month with `h`/`l`.
+
+Yearly View ~
+    12-month overview showing event counts.
+    Navigate by year with `h`/`l`.
+
+==============================================================================
+9. API                                                      *ical-api*
+
+Lua API for programmatic access:
+
+>lua
+    local ical = require("ical")
+
+    -- Open agenda
+    ical.open_agenda()
+    ical.open_agenda({ view = "weekly" })
+
+    -- Navigation
+    ical.navigate(1)    -- Next period
+    ical.navigate(-1)   -- Previous period
+    ical.goto_today()
+
+    -- View modes
+    ical.set_view_mode("daily")
+    ical.set_view_mode(ical.VIEW_MODES.WEEKLY)
+
+    -- Calendar management
+    ical.add_calendar({
+      path = "~/calendar.ics",
+      name = "My Calendar",
+      color = "#87CEEB",
+      recursive = false,
+    })
+    ical.remove_calendar("My Calendar")
+    ical.remove_calendar(1)  -- By index
+    ical.list_calendars()
+
+    -- Create new items
+    ical.new_event()  -- Opens event form
+    ical.new_task()   -- Opens task form
+
+    -- Refresh
+    ical.refresh()
+
+    -- Load raw data
+    local events, todos = ical.load_calendars()
+<
+VIEW_MODES ~
+>lua
+    ical.VIEW_MODES.AGENDA   -- "agenda"
+    ical.VIEW_MODES.DAILY    -- "daily"
+    ical.VIEW_MODES.WEEKLY   -- "weekly"
+    ical.VIEW_MODES.MONTHLY  -- "monthly"
+    ical.VIEW_MODES.YEARLY   -- "yearly"
+<
+==============================================================================
+vim:tw=78:ts=8:ft=help:norl:
