@@ -159,4 +159,17 @@ function M.decode_ical_text(text)
   return text
 end
 
+--- Read file contents
+---@param filepath string Path to file
+---@return string|nil content File contents or nil on error
+function M.read_file(filepath)
+  local file = io.open(filepath, "r")
+  if not file then
+    return nil
+  end
+  local content = file:read("*a")
+  file:close()
+  return content
+end
+
 return M

@@ -118,9 +118,14 @@ Event/Task Creation Commands ~
     Open a popup form to create a new calendar event.
     Fields: Title, Date, Start Time, End Time, Location, Description, Calendar
 
+    Events are saved as individual .ics files with UUID filenames for
+    uniqueness (e.g., `a1b2c3d4-e5f6-4a7b-8c9d-e0f1a2b3c4d5.ics`).
+
 :IcalNewTask                                                  *:IcalNewTask*
     Open a popup form to create a new task/todo.
     Fields: Title, Due Date, Due Time, Priority, Description, Calendar
+
+    Tasks are saved as individual .ics files with UUID filenames.
 
 ==============================================================================
 5. KEYMAPS                                              *ical-keymaps*
@@ -153,6 +158,15 @@ Event/Task Form ~
     `<Tab>`         Cycle select options / Next field
     `S` or `<C-s>`  Save and create
     `q` or `<Esc>`  Cancel
+
+Text Input Fields ~
+    `<CR>`          Save input (single-line fields)
+    `<Esc>`         Cancel input
+
+Description Field (Multiline) ~
+    `<CR>`          Insert new line
+    `<C-s>`         Save description
+    `<Esc>`         Cancel input
 
 In calendar.vim buffer ~
     `a`             Open iCal Agenda

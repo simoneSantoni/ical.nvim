@@ -25,8 +25,14 @@ local state = {
   view_mode = M.VIEW_MODES.AGENDA,
   -- Current view date (center of the view)
   view_date = nil,
-  -- Width of tasks sidebar
-  tasks_width = 35,
+  -- Width of tasks sidebar (default, can be resized)
+  tasks_width = 45,
+  -- Callback for window resize
+  on_resize_callback = nil,
+  -- Line to item mapping for main buffer (line_num -> {type="event"|"task", item=...})
+  line_items = {},
+  -- Line to item mapping for tasks buffer
+  tasks_line_items = {},
 }
 
 --- Check if window is open
@@ -70,6 +76,35 @@ function M.set_view_date(timestamp)
   state.view_date = timestamp
 end
 
+--- Set callback for window resize
+---@param callback function
+function M.set_resize_callback(callback)
+  state.on_resize_callback = callback
+end
+
+--- Get item at current cursor position
+---@return table|nil item The event or task at cursor, or nil
+---@return string|nil type "event" or "task"
+function M.get_item_at_cursor()
+  local win = vim.api.nvim_get_current_win()
+  local cursor = vim.api.nvim_win_get_cursor(win)
+  local line_num = cursor[1]
+
+  -- Check if in tasks buffer
+  if win == state.tasks_win and state.tasks_line_items[line_num] then
+    local item_info = state.tasks_line_items[line_num]
+    return item_info.item, item_info.type
+  end
+
+  -- Check if in main buffer
+  if win == state.main_win and state.line_items[line_num] then
+    local item_info = state.line_items[line_num]
+    return item_info.item, item_info.type
+  end
+
+  return nil, nil
+end
+
 --- Create the tab-based UI
 ---@param opts table Window options
 function M.open_window(opts)
@@ -103,6 +138,7 @@ function M.open_window(opts)
   vim.wo[state.main_win].relativenumber = false
   vim.wo[state.main_win].signcolumn = "no"
   vim.wo[state.main_win].foldcolumn = "0"
+  vim.wo[state.main_win].list = false
 
   -- Set tab label
   vim.api.nvim_buf_set_name(state.main_buf, "iCal Agenda")
@@ -111,6 +147,22 @@ function M.open_window(opts)
   if state.show_tasks then
     M.open_tasks_sidebar()
   end
+
+  -- Setup resize handler to re-render on window resize
+  local augroup = vim.api.nvim_create_augroup("IcalResize", { clear = true })
+  vim.api.nvim_create_autocmd("WinResized", {
+    group = augroup,
+    callback = function()
+      if M.is_open() then
+        -- Schedule to avoid issues during resize
+        vim.schedule(function()
+          if state.on_resize_callback then
+            state.on_resize_callback()
+          end
+        end)
+      end
+    end,
+  })
 
   return state.main_buf, state.main_win
 end
@@ -142,6 +194,7 @@ function M.open_tasks_sidebar()
   vim.wo[state.tasks_win].relativenumber = false
   vim.wo[state.tasks_win].signcolumn = "no"
   vim.wo[state.tasks_win].winfixwidth = true
+  vim.wo[state.tasks_win].list = false
 
   -- Go back to main window
   if state.main_win and vim.api.nvim_win_is_valid(state.main_win) then
@@ -236,14 +289,16 @@ end
 ---@param width number Available width
 ---@return string[] lines
 ---@return table[] highlights
+---@return table line_items Line to item mapping
 local function render_agenda_view(events, opts, icons, width)
   local lines = {}
   local highlights = {}
+  local line_items = {}
 
   if #events == 0 then
     table.insert(lines, "")
     table.insert(lines, "  No upcoming events")
-    return lines, highlights
+    return lines, highlights, line_items
   end
 
   local current_date = nil
@@ -283,18 +338,19 @@ local function render_agenda_view(events, opts, icons, width)
 
     -- Truncate if too long
     local max_width = width - 2
-    if #event_line > max_width then
-      event_line = event_line:sub(1, max_width - 3) .. "..."
+    if vim.fn.strdisplaywidth(event_line) > max_width then
+      event_line = vim.fn.strcharpart(event_line, 0, max_width - 3) .. "..."
     end
 
     local line_num = #lines + 1
     table.insert(lines, event_line)
+    line_items[line_num] = { type = "event", item = event }
 
     local time_end = #prefix + #time_str
     table.insert(highlights, { line_num, #prefix, time_end, "IcalAgendaEventTime" })
   end
 
-  return lines, highlights
+  return lines, highlights, line_items
 end
 
 --- Generate daily view
@@ -305,9 +361,11 @@ end
 ---@param width number Available width
 ---@return string[] lines
 ---@return table[] highlights
+---@return table line_items
 local function render_daily_view(events, view_date, opts, icons, width)
   local lines = {}
   local highlights = {}
+  local line_items = {}
 
   -- Day header
   local day_header = os.date("%A, %B %d, %Y", view_date)
@@ -332,7 +390,7 @@ local function render_daily_view(events, view_date, opts, icons, width)
 
   if #day_events == 0 then
     table.insert(lines, "  No events scheduled")
-    return lines, highlights
+    return lines, highlights, line_items
   end
 
   -- Hour-by-hour timeline
@@ -353,7 +411,9 @@ local function render_daily_view(events, view_date, opts, icons, width)
     table.insert(highlights, { #lines, 0, 8, "IcalAgendaEventTime" })
     for _, event in ipairs(all_day_events) do
       local line = "  " .. icons.all_day .. " " .. event.summary
+      local line_num = #lines + 1
       table.insert(lines, line)
+      line_items[line_num] = { type = "event", item = event }
     end
     table.insert(lines, "")
   end
@@ -375,17 +435,18 @@ local function render_daily_view(events, view_date, opts, icons, width)
       end
 
       local max_width = width - 2
-      if #line > max_width then
-        line = line:sub(1, max_width - 3) .. "..."
+      if vim.fn.strdisplaywidth(line) > max_width then
+        line = vim.fn.strcharpart(line, 0, max_width - 3) .. "..."
       end
 
       local line_num = #lines + 1
       table.insert(lines, line)
+      line_items[line_num] = { type = "event", item = event }
       table.insert(highlights, { line_num, #prefix, #prefix + #time_str + 3 + #end_time_str, "IcalAgendaEventTime" })
     end
   end
 
-  return lines, highlights
+  return lines, highlights, line_items
 end
 
 --- Generate weekly view (7-day grid)
@@ -396,9 +457,11 @@ end
 ---@param width number Available width
 ---@return string[] lines
 ---@return table[] highlights
+---@return table line_items
 local function render_weekly_view(events, view_date, opts, icons, width)
   local lines = {}
   local highlights = {}
+  local line_items = {}
 
   -- Find start of week (Monday)
   local dow = utils.day_of_week(view_date)
@@ -457,17 +520,19 @@ local function render_weekly_view(events, view_date, opts, icons, width)
 
         local line = "    " .. time_str .. " " .. event.summary
         local max_width = width - 4
-        if #line > max_width then
-          line = line:sub(1, max_width - 3) .. "..."
+        if vim.fn.strdisplaywidth(line) > max_width then
+          line = vim.fn.strcharpart(line, 0, max_width - 3) .. "..."
         end
 
+        local event_line_num = #lines + 1
         table.insert(lines, line)
-        table.insert(highlights, { #lines, 4, 4 + #time_str, "IcalAgendaEventTime" })
+        line_items[event_line_num] = { type = "event", item = event }
+        table.insert(highlights, { event_line_num, 4, 4 + #time_str, "IcalAgendaEventTime" })
       end
     end
   end
 
-  return lines, highlights
+  return lines, highlights, line_items
 end
 
 --- Generate monthly view (calendar grid)
@@ -478,9 +543,11 @@ end
 ---@param width number Available width
 ---@return string[] lines
 ---@return table[] highlights
+---@return table line_items
 local function render_monthly_view(events, view_date, opts, icons, width)
   local lines = {}
   local highlights = {}
+  local line_items = {}
 
   local date_parts = os.date("*t", view_date)
   local year = date_parts.year
@@ -552,7 +619,7 @@ local function render_monthly_view(events, view_date, opts, icons, width)
 
         if event_count > 0 then
           day_str = day_str .. "*"
-          event_indicator = string.format("%-" .. day_width .. "s", " " .. event_count .. "ev")
+          event_indicator = string.format("%-" .. day_width .. "s", "[" .. event_count .. "]")
         else
           event_indicator = string.rep(" ", day_width)
         end
@@ -598,12 +665,14 @@ local function render_monthly_view(events, view_date, opts, icons, width)
       local time_str = event.all_day and (icons.all_day .. " All day")
         or os.date(opts.time_format, event.dtstart)
       local line = "  " .. time_str .. " " .. event.summary
+      local event_line_num = #lines + 1
       table.insert(lines, line)
-      table.insert(highlights, { #lines, 2, 2 + #time_str, "IcalAgendaEventTime" })
+      line_items[event_line_num] = { type = "event", item = event }
+      table.insert(highlights, { event_line_num, 2, 2 + #time_str, "IcalAgendaEventTime" })
     end
   end
 
-  return lines, highlights
+  return lines, highlights, line_items
 end
 
 --- Generate yearly view (12-month overview)
@@ -614,9 +683,11 @@ end
 ---@param width number Available width
 ---@return string[] lines
 ---@return table[] highlights
+---@return table line_items
 local function render_yearly_view(events, view_date, opts, icons, width)
   local lines = {}
   local highlights = {}
+  local line_items = {}  -- Yearly view doesn't show individual events
 
   local year = os.date("*t", view_date).year
 
@@ -674,7 +745,7 @@ local function render_yearly_view(events, view_date, opts, icons, width)
     table.insert(lines, "")
   end
 
-  return lines, highlights
+  return lines, highlights, line_items
 end
 
 --- Render tasks into the sidebar buffer
@@ -686,22 +757,20 @@ function M.render_tasks(tasks, opts, icons)
     return
   end
 
+  -- Update tasks_width from actual window width (handles resize)
+  if state.tasks_win and vim.api.nvim_win_is_valid(state.tasks_win) then
+    state.tasks_width = vim.api.nvim_win_get_width(state.tasks_win)
+  end
+
   local lines = {}
   local highlights = {}
   local now = os.time()
+  local separator = " " .. string.rep("─", state.tasks_width - 3)
 
-  -- Header
-  table.insert(lines, " Tasks")
-  table.insert(highlights, { 1, 0, 6, "IcalAgendaTitle" })
-  table.insert(lines, string.rep("─", state.tasks_width - 2))
-  table.insert(lines, "")
+  -- Reset tasks line items mapping
+  state.tasks_line_items = {}
 
-  if #tasks == 0 then
-    table.insert(lines, " No tasks")
-    goto write_buffer
-  end
-
-  -- Group tasks by date
+  -- Group tasks by date (declared early to avoid goto scope issues)
   local overdue_tasks = {}
   local today_tasks = {}
   local upcoming_tasks = {}
@@ -709,6 +778,17 @@ function M.render_tasks(tasks, opts, icons)
 
   local today_start = utils.start_of_day(now)
   local today_end = utils.end_of_day(now)
+
+  -- Header
+  table.insert(lines, " Tasks")
+  table.insert(highlights, { 1, 0, 6, "IcalAgendaTitle" })
+  table.insert(lines, separator)
+  table.insert(lines, "")
+
+  if #tasks == 0 then
+    table.insert(lines, " No tasks")
+    goto write_buffer
+  end
 
   for _, task in ipairs(tasks) do
     if task.status == "COMPLETED" and not opts.show_completed_tasks then
@@ -739,11 +819,13 @@ function M.render_tasks(tasks, opts, icons)
       if task.due then
         line = line .. " (" .. os.date(opts.date_format, task.due) .. ")"
       end
-      if #line > state.tasks_width - 2 then
-        line = line:sub(1, state.tasks_width - 5) .. "..."
+      if vim.fn.strdisplaywidth(line) > state.tasks_width - 2 then
+        line = vim.fn.strcharpart(line, 0, state.tasks_width - 5) .. "..."
       end
+      local task_line_num = #lines + 1
       table.insert(lines, line)
-      table.insert(highlights, { #lines, 0, #line, "IcalAgendaOverdue" })
+      state.tasks_line_items[task_line_num] = { type = "task", item = task }
+      table.insert(highlights, { task_line_num, 0, #line, "IcalAgendaOverdue" })
     end
     table.insert(lines, "")
   end
@@ -756,12 +838,14 @@ function M.render_tasks(tasks, opts, icons)
     for _, task in ipairs(today_tasks) do
       local checkbox = task.status == "COMPLETED" and icons.task_done or icons.task
       local line = "  " .. checkbox .. " " .. task.summary
-      if #line > state.tasks_width - 2 then
-        line = line:sub(1, state.tasks_width - 5) .. "..."
+      if vim.fn.strdisplaywidth(line) > state.tasks_width - 2 then
+        line = vim.fn.strcharpart(line, 0, state.tasks_width - 5) .. "..."
       end
+      local task_line_num = #lines + 1
       table.insert(lines, line)
+      state.tasks_line_items[task_line_num] = { type = "task", item = task }
       local hl = task.status == "COMPLETED" and "IcalAgendaTaskCompleted" or "IcalAgendaTaskPending"
-      table.insert(highlights, { #lines, 0, #line, hl })
+      table.insert(highlights, { task_line_num, 0, #line, hl })
     end
     table.insert(lines, "")
   end
@@ -798,12 +882,14 @@ function M.render_tasks(tasks, opts, icons)
       for _, task in ipairs(date_entry.data.tasks) do
         local checkbox = task.status == "COMPLETED" and icons.task_done or icons.task
         local line = "   " .. checkbox .. " " .. task.summary
-        if #line > state.tasks_width - 2 then
-          line = line:sub(1, state.tasks_width - 5) .. "..."
+        if vim.fn.strdisplaywidth(line) > state.tasks_width - 2 then
+          line = vim.fn.strcharpart(line, 0, state.tasks_width - 5) .. "..."
         end
+        local task_line_num = #lines + 1
         table.insert(lines, line)
+        state.tasks_line_items[task_line_num] = { type = "task", item = task }
         local hl = task.status == "COMPLETED" and "IcalAgendaTaskCompleted" or "IcalAgendaTaskPending"
-        table.insert(highlights, { #lines, 0, #line, hl })
+        table.insert(highlights, { task_line_num, 0, #line, hl })
       end
     end
     table.insert(lines, "")
@@ -817,12 +903,14 @@ function M.render_tasks(tasks, opts, icons)
     for _, task in ipairs(no_date_tasks) do
       local checkbox = task.status == "COMPLETED" and icons.task_done or icons.task
       local line = "  " .. checkbox .. " " .. task.summary
-      if #line > state.tasks_width - 2 then
-        line = line:sub(1, state.tasks_width - 5) .. "..."
+      if vim.fn.strdisplaywidth(line) > state.tasks_width - 2 then
+        line = vim.fn.strcharpart(line, 0, state.tasks_width - 5) .. "..."
       end
+      local task_line_num = #lines + 1
       table.insert(lines, line)
+      state.tasks_line_items[task_line_num] = { type = "task", item = task }
       local hl = task.status == "COMPLETED" and "IcalAgendaTaskCompleted" or "IcalAgendaTaskPending"
-      table.insert(highlights, { #lines, 0, #line, hl })
+      table.insert(highlights, { task_line_num, 0, #line, hl })
     end
   end
 
@@ -872,20 +960,20 @@ function M.render(events, tasks, opts, icons)
   table.insert(lines, "")
 
   -- Render based on view mode
-  local content_lines, content_hl
+  local content_lines, content_hl, content_line_items
 
   if state.view_mode == M.VIEW_MODES.AGENDA then
-    content_lines, content_hl = render_agenda_view(events, opts, icons, width)
+    content_lines, content_hl, content_line_items = render_agenda_view(events, opts, icons, width)
   elseif state.view_mode == M.VIEW_MODES.DAILY then
-    content_lines, content_hl = render_daily_view(events, view_date, opts, icons, width)
+    content_lines, content_hl, content_line_items = render_daily_view(events, view_date, opts, icons, width)
   elseif state.view_mode == M.VIEW_MODES.WEEKLY then
-    content_lines, content_hl = render_weekly_view(events, view_date, opts, icons, width)
+    content_lines, content_hl, content_line_items = render_weekly_view(events, view_date, opts, icons, width)
   elseif state.view_mode == M.VIEW_MODES.MONTHLY then
-    content_lines, content_hl = render_monthly_view(events, view_date, opts, icons, width)
+    content_lines, content_hl, content_line_items = render_monthly_view(events, view_date, opts, icons, width)
   elseif state.view_mode == M.VIEW_MODES.YEARLY then
-    content_lines, content_hl = render_yearly_view(events, view_date, opts, icons, width)
+    content_lines, content_hl, content_line_items = render_yearly_view(events, view_date, opts, icons, width)
   else
-    content_lines, content_hl = render_agenda_view(events, opts, icons, width)
+    content_lines, content_hl, content_line_items = render_agenda_view(events, opts, icons, width)
   end
 
   -- Append content
@@ -897,10 +985,16 @@ function M.render(events, tasks, opts, icons)
     table.insert(highlights, { hl[1] + line_offset, hl[2], hl[3], hl[4] })
   end
 
+  -- Store line-to-item mapping (adjusted for line offset)
+  state.line_items = {}
+  for line_num, item_info in pairs(content_line_items or {}) do
+    state.line_items[line_num + line_offset] = item_info
+  end
+
   -- Footer with help
   table.insert(lines, "")
   table.insert(lines, string.rep("─", width - 2))
-  local footer = "q:close r:refresh t:today </> nav n:new event N:new task"
+  local footer = "q:close r:refresh t:today </> nav n:event N:task x:done"
   table.insert(lines, footer)
   table.insert(highlights, { #lines, 0, #footer, "IcalAgendaFooter" })
 
@@ -977,16 +1071,31 @@ function M.setup_keymaps(keymaps, callbacks)
   -- Create new event/task keys
   if callbacks.new_event then
     vim.keymap.set("n", "n", callbacks.new_event, { buffer = buf, silent = true, desc = "New event" })
-    vim.keymap.set("n", "e", callbacks.new_event, { buffer = buf, silent = true, desc = "New event" })
   end
   if callbacks.new_task then
     vim.keymap.set("n", "N", callbacks.new_task, { buffer = buf, silent = true, desc = "New task" })
+  end
+
+  -- View item details on Enter
+  if callbacks.view_item then
+    vim.keymap.set("n", "<CR>", callbacks.view_item, { buffer = buf, silent = true, desc = "View item details" })
+  end
+
+  -- Complete task
+  if callbacks.complete_task then
+    vim.keymap.set("n", "x", callbacks.complete_task, { buffer = buf, silent = true, desc = "Complete task" })
   end
 
   -- Also set keymaps on tasks buffer if it exists
   if state.tasks_buf and vim.api.nvim_buf_is_valid(state.tasks_buf) then
     for _, key in ipairs(close_keys) do
       vim.keymap.set("n", key, callbacks.close, { buffer = state.tasks_buf, silent = true, desc = "Close agenda" })
+    end
+    if callbacks.view_item then
+      vim.keymap.set("n", "<CR>", callbacks.view_item, { buffer = state.tasks_buf, silent = true, desc = "View item details" })
+    end
+    if callbacks.complete_task then
+      vim.keymap.set("n", "x", callbacks.complete_task, { buffer = state.tasks_buf, silent = true, desc = "Complete task" })
     end
   end
 end
@@ -1002,7 +1111,14 @@ function M.create_highlights(highlights)
   vim.api.nvim_set_hl(0, "IcalAgendaToday", { link = highlights.today, default = true })
   vim.api.nvim_set_hl(0, "IcalAgendaTaskPending", { link = highlights.task_pending, default = true })
   vim.api.nvim_set_hl(0, "IcalAgendaTaskCompleted", { link = highlights.task_completed, default = true })
-  vim.api.nvim_set_hl(0, "IcalAgendaOverdue", { link = highlights.overdue, default = true })
+  -- Overdue tasks: bold + inherit color from overdue highlight
+  local overdue_hl = vim.api.nvim_get_hl(0, { name = highlights.overdue, link = false })
+  vim.api.nvim_set_hl(0, "IcalAgendaOverdue", {
+    fg = overdue_hl.fg,
+    bold = true,
+    italic = true,
+    default = true,
+  })
   vim.api.nvim_set_hl(0, "IcalAgendaFooter", { link = "Comment", default = true })
   vim.api.nvim_set_hl(0, "IcalAgendaActiveMode", { link = "Special", default = true })
   vim.api.nvim_set_hl(0, "IcalAgendaMode", { link = "Comment", default = true })

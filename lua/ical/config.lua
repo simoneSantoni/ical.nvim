@@ -32,6 +32,7 @@ M.defaults = {
     show_all_day = true,
     show_tasks = true,
     show_completed_tasks = false,
+    delete_completed_tasks = true, -- Delete task files when marked complete
   },
 
   -- Highlight groups

@@ -280,6 +280,10 @@ function M.refresh()
   -- Open window if not already open
   if not ui.is_open() then
     ui.open_window(M.config.window)
+    -- Set resize callback to refresh on window resize
+    ui.set_resize_callback(function()
+      M.refresh()
+    end)
   end
 
   -- Render
@@ -335,6 +339,14 @@ function M.refresh()
     end,
     new_task = function()
       M.new_task()
+    end,
+    -- View item details
+    view_item = function()
+      M.view_item()
+    end,
+    -- Complete task
+    complete_task = function()
+      M.complete_task()
     end,
   })
 end
@@ -481,20 +493,28 @@ local function get_calendar_write_path(cal_name)
   return nil
 end
 
+--- Generate a UUID v4
+---@return string uuid
+local function generate_uuid()
+  local chars = "0123456789abcdef"
+  local uuid = {}
+  for i = 1, 32 do
+    uuid[i] = chars:sub(math.random(1, 16), math.random(1, 16))
+  end
+  -- Format as 8-4-4-4-12
+  return table.concat(uuid, "", 1, 8)
+    .. "-" .. table.concat(uuid, "", 9, 12)
+    .. "-4" .. table.concat(uuid, "", 14, 16)  -- Version 4
+    .. "-" .. chars:sub(math.random(9, 12), math.random(9, 12)) .. table.concat(uuid, "", 18, 20)  -- Variant
+    .. "-" .. table.concat(uuid, "", 21, 32)
+end
+
 --- Generate a filename for a new event/task
----@param summary string Event/task summary
----@param item_type string "event" or "task"
+---@param summary string Event/task summary (unused, kept for API compatibility)
+---@param item_type string "event" or "task" (unused, kept for API compatibility)
 ---@return string filename
 local function generate_filename(summary, item_type)
-  -- Sanitize summary for filename
-  local safe_name = summary:gsub("[^%w%s-]", ""):gsub("%s+", "_"):sub(1, 30)
-  if safe_name == "" then
-    safe_name = item_type
-  end
-
-  -- Add timestamp for uniqueness
-  local timestamp = os.date("%Y%m%d_%H%M%S")
-  return string.format("%s_%s.ics", safe_name, timestamp)
+  return generate_uuid() .. ".ics"
 end
 
 --- Save content to an iCal file
@@ -597,6 +617,101 @@ function M.new_task(opts)
       vim.notify("ical: " .. err, vim.log.levels.ERROR)
     end
   end)
+end
+
+--- View details of event/task at cursor
+function M.view_item()
+  local item, item_type = ui.get_item_at_cursor()
+  if not item then
+    return
+  end
+
+  local form_module = get_form()
+
+  if item_type == "event" then
+    -- Prepare event data for display
+    local data = {
+      summary = item.summary or "",
+      date = item.dtstart and os.date("%Y-%m-%d", item.dtstart) or "",
+      start_time = item.all_day and "" or (item.dtstart and os.date("%H:%M", item.dtstart) or ""),
+      end_time = item.all_day and "" or (item.dtend and os.date("%H:%M", item.dtend) or ""),
+      location = item.location or "",
+      description = item.description or "",
+      calendar = item.calendar_name or "",
+    }
+    form_module.open_view("event", data)
+  else
+    -- Prepare task data for display
+    local data = {
+      summary = item.summary or "",
+      due_date = item.due and os.date("%Y-%m-%d", item.due) or "",
+      due_time = item.due and os.date("%H:%M", item.due) or "",
+      priority = item.priority and tostring(item.priority) or "0",
+      description = item.description or "",
+      calendar = item.calendar_name or "",
+      status = item.status or "NEEDS-ACTION",
+    }
+    form_module.open_view("task", data)
+  end
+end
+
+--- Mark task at cursor as completed
+function M.complete_task()
+  local item, item_type = ui.get_item_at_cursor()
+  if not item or item_type ~= "task" then
+    vim.notify("ical: no task under cursor", vim.log.levels.WARN)
+    return
+  end
+
+  if item.status == "COMPLETED" then
+    vim.notify("ical: task already completed", vim.log.levels.INFO)
+    return
+  end
+
+  local source_file = item.source_file
+  if not source_file or vim.fn.filereadable(source_file) ~= 1 then
+    vim.notify("ical: cannot find task source file", vim.log.levels.ERROR)
+    return
+  end
+
+  if M.config.display.delete_completed_tasks then
+    -- Delete the task file
+    local ok, err = os.remove(source_file)
+    if not ok then
+      vim.notify("ical: failed to delete task: " .. (err or "unknown error"), vim.log.levels.ERROR)
+      return
+    end
+    vim.notify("ical: completed and removed '" .. item.summary .. "'", vim.log.levels.INFO)
+  else
+    -- Update STATUS in the file
+    local content = utils.read_file(source_file)
+    if not content then
+      vim.notify("ical: cannot read task file", vim.log.levels.ERROR)
+      return
+    end
+
+    -- Update STATUS line
+    content = content:gsub("STATUS:[^\r\n]+", "STATUS:COMPLETED")
+
+    -- Add COMPLETED timestamp if not present
+    local completed_ts = os.date("!%Y%m%dT%H%M%SZ")
+    if not content:match("COMPLETED:") then
+      content = content:gsub("(STATUS:COMPLETED)", "%1\r\nCOMPLETED:" .. completed_ts)
+    end
+
+    -- Write back
+    local file = io.open(source_file, "w")
+    if not file then
+      vim.notify("ical: cannot write task file", vim.log.levels.ERROR)
+      return
+    end
+    file:write(content)
+    file:close()
+    vim.notify("ical: marked '" .. item.summary .. "' as completed", vim.log.levels.INFO)
+  end
+
+  -- Refresh to update the view
+  M.refresh()
 end
 
 return M
