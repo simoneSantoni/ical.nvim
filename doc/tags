@@ -2,14 +2,10 @@
 :IcalAgenda	ical.txt	/*:IcalAgenda*
 :IcalAgendaClose	ical.txt	/*:IcalAgendaClose*
 :IcalAgendaRefresh	ical.txt	/*:IcalAgendaRefresh*
-:IcalDaily	ical.txt	/*:IcalDaily*
 :IcalListCalendars	ical.txt	/*:IcalListCalendars*
-:IcalMonthly	ical.txt	/*:IcalMonthly*
 :IcalNewEvent	ical.txt	/*:IcalNewEvent*
 :IcalNewTask	ical.txt	/*:IcalNewTask*
 :IcalRemoveCalendar	ical.txt	/*:IcalRemoveCalendar*
-:IcalWeekly	ical.txt	/*:IcalWeekly*
-:IcalYearly	ical.txt	/*:IcalYearly*
 ical-api	ical.txt	/*ical-api*
 ical-commands	ical.txt	/*ical-commands*
 ical-configuration	ical.txt	/*ical-configuration*
@@ -19,5 +15,4 @@ ical-keymaps	ical.txt	/*ical-keymaps*
 ical-quickstart	ical.txt	/*ical-quickstart*
 ical-requirements	ical.txt	/*ical-requirements*
 ical-sources	ical.txt	/*ical-sources*
-ical-views	ical.txt	/*ical-views*
 ical.txt	ical.txt	/*ical.txt*

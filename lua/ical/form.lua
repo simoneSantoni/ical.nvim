@@ -1,4 +1,4 @@
--- Form UI for creating events and tasks
+-- Form UI for creating and editing events and tasks
 local utils = require("ical.utils")
 
 local M = {}
@@ -30,9 +30,32 @@ local task_fields = {
   { name = "due_date", label = "Due Date", required = false, default = "", placeholder = "YYYY-MM-DD (optional)" },
   { name = "due_time", label = "Due Time", required = false, default = "", placeholder = "HH:MM (optional)" },
   { name = "priority", label = "Priority", required = false, default = "0", placeholder = "1-9 (1=highest, 0=none)" },
+  { name = "status", label = "Status", required = true, default = "pending", type = "select" },
+  { name = "tags", label = "Tags", required = false, default = "", placeholder = "comma-separated (e.g. work, urgent)" },
   { name = "description", label = "Description", required = false, default = "", multiline = true, lines = 8 },
   { name = "calendar", label = "Calendar", required = true, default = "", type = "select" },
 }
+
+-- Map display status values to iCal STATUS property values
+local status_to_ical = {
+  pending = "NEEDS-ACTION",
+  overdue = "IN-PROCESS",
+  complete = "COMPLETED",
+}
+
+-- Map iCal STATUS values back to display status
+local ical_to_status = {
+  ["NEEDS-ACTION"] = "pending",
+  ["IN-PROCESS"] = "overdue",
+  ["COMPLETED"] = "complete",
+}
+
+--- Convert iCal STATUS to display status
+---@param ical_status string iCal STATUS value
+---@return string display status (pending, overdue, complete)
+function M.ical_to_display_status(ical_status)
+  return ical_to_status[ical_status] or "pending"
+end
 
 --- Generate a unique ID for iCal
 ---@return string UID
@@ -155,8 +178,14 @@ function M.create_vtodo(data)
   -- Summary (required)
   table.insert(lines, "SUMMARY:" .. escape_ical_text(data.summary))
 
-  -- Status
-  table.insert(lines, "STATUS:NEEDS-ACTION")
+  -- Status (map display value to iCal STATUS)
+  local ical_status = status_to_ical[data.status] or "NEEDS-ACTION"
+  table.insert(lines, "STATUS:" .. ical_status)
+
+  -- Add COMPLETED timestamp when marking complete
+  if ical_status == "COMPLETED" then
+    table.insert(lines, "COMPLETED:" .. os.date("!%Y%m%dT%H%M%SZ"))
+  end
 
   -- Due date (optional)
   if data.due_date and data.due_date ~= "" then
@@ -173,6 +202,21 @@ function M.create_vtodo(data)
     local priority = tonumber(data.priority)
     if priority and priority >= 1 and priority <= 9 then
       table.insert(lines, "PRIORITY:" .. priority)
+    end
+  end
+
+  -- Tags / Categories (optional)
+  if data.tags and data.tags ~= "" then
+    -- Parse comma-separated tags, trim whitespace
+    local tags = {}
+    for tag in data.tags:gmatch("[^,]+") do
+      local trimmed = tag:match("^%s*(.-)%s*$")
+      if trimmed and trimmed ~= "" then
+        table.insert(tags, trimmed)
+      end
+    end
+    if #tags > 0 then
+      table.insert(lines, "CATEGORIES:" .. table.concat(tags, ","))
     end
   end
 
@@ -495,25 +539,17 @@ local function setup_keymaps()
   vim.keymap.set("n", "<Esc>", M.close, opts)
 end
 
---- Open the form window
----@param form_type string "event" or "task"
+--- Initialize fields from field definitions, optionally pre-filling with data
+---@param field_defs table[] Field definitions
 ---@param calendars table[] Available calendars
----@param on_submit function Callback with form data
-function M.open(form_type, calendars, on_submit)
-  -- Close existing form
-  M.close()
-
-  state.form_type = form_type
-  state.on_submit = on_submit
-  state.current_field = 1
-
-  -- Copy field definitions
-  local field_defs = form_type == "event" and event_fields or task_fields
-  state.fields = {}
+---@param data table|nil Pre-existing data to populate fields
+---@return table[] fields Initialized fields
+local function init_fields(field_defs, calendars, data)
+  local fields = {}
   for _, def in ipairs(field_defs) do
     local field = vim.tbl_extend("force", {}, def)
 
-    -- Setup calendar select options
+    -- Setup select field options
     if field.name == "calendar" then
       field.options = {}
       for _, cal in ipairs(calendars) do
@@ -522,15 +558,55 @@ function M.open(form_type, calendars, on_submit)
       if #field.options > 0 then
         field.selected_idx = 1
         field.value = field.options[1]
+        -- Try to match pre-existing calendar name
+        if data and data.calendar and data.calendar ~= "" then
+          for idx, name in ipairs(field.options) do
+            if name == data.calendar then
+              field.selected_idx = idx
+              field.value = name
+              break
+            end
+          end
+        end
       else
         field.options = { "(no calendars configured)" }
         field.selected_idx = 1
         field.value = ""
       end
+    elseif field.name == "status" then
+      field.options = { "pending", "overdue", "complete" }
+      field.selected_idx = 1
+      field.value = "pending"
+      -- Try to match pre-existing status
+      if data and data.status and data.status ~= "" then
+        for idx, opt in ipairs(field.options) do
+          if opt == data.status then
+            field.selected_idx = idx
+            field.value = opt
+            break
+          end
+        end
+      end
+    elseif data and data[field.name] then
+      field.value = data[field.name]
     end
 
-    table.insert(state.fields, field)
+    table.insert(fields, field)
   end
+  return fields
+end
+
+--- Create and show the form window
+---@param title string Window title
+---@param fields table[] Initialized fields
+---@param on_submit function|nil Submit callback (nil for view-only)
+local function show_form_window(title, fields, on_submit)
+  -- Close existing form
+  M.close()
+
+  state.fields = fields
+  state.on_submit = on_submit
+  state.current_field = 1
 
   -- Create buffer
   state.buf = vim.api.nvim_create_buf(false, true)
@@ -541,19 +617,18 @@ function M.open(form_type, calendars, on_submit)
 
   -- Calculate window size based on content
   local width = 83
-  -- Calculate height: fields + footer (2 lines)
-  local content_height = 2  -- Footer only (title is in window border)
+  local content_height = 2  -- Footer
   for _, field in ipairs(state.fields) do
     if field.multiline then
-      content_height = content_height + 1 + (field.lines or 3) + 1  -- label + lines + spacing
+      content_height = content_height + 1 + (field.lines or 3) + 1
     else
-      content_height = content_height + 3  -- label + value + spacing
+      content_height = content_height + 3
     end
   end
   local height = content_height
-  local ui = vim.api.nvim_list_uis()[1]
-  local row = math.floor((ui.height - height) / 2)
-  local col = math.floor((ui.width - width) / 2)
+  local ui_info = vim.api.nvim_list_uis()[1]
+  local row = math.floor((ui_info.height - height) / 2)
+  local col = math.floor((ui_info.width - width) / 2)
 
   -- Store position for input box positioning
   state.win_row = row
@@ -570,7 +645,7 @@ function M.open(form_type, calendars, on_submit)
     col = col,
     style = "minimal",
     border = "rounded",
-    title = form_type == "event" and " New Event " or " New Task ",
+    title = title,
     title_pos = "center",
   })
 
@@ -579,8 +654,28 @@ function M.open(form_type, calendars, on_submit)
   vim.wo[state.win].list = false
 
   -- Setup keymaps and render
-  setup_keymaps()
+  if on_submit then
+    setup_keymaps()
+  else
+    -- View-only keymaps
+    local buf = state.buf
+    vim.keymap.set("n", "q", M.close, { buffer = buf, silent = true })
+    vim.keymap.set("n", "<Esc>", M.close, { buffer = buf, silent = true })
+    vim.keymap.set("n", "<CR>", M.close, { buffer = buf, silent = true })
+  end
   render_form()
+end
+
+--- Open the form window for creating a new item
+---@param form_type string "event" or "task"
+---@param calendars table[] Available calendars
+---@param on_submit function Callback with form data
+function M.open(form_type, calendars, on_submit)
+  state.form_type = form_type
+  local field_defs = form_type == "event" and event_fields or task_fields
+  local fields = init_fields(field_defs, calendars, nil)
+  local title = form_type == "event" and " New Event " or " New Task "
+  show_form_window(title, fields, on_submit)
 end
 
 --- Close the form window
@@ -604,33 +699,26 @@ end
 ---@param form_type string "event" or "task"
 ---@param data table Pre-filled data to display
 function M.open_view(form_type, data)
-  -- Close existing form
-  M.close()
-
   state.form_type = form_type
-  state.on_submit = nil  -- View-only, no submit
-  state.current_field = 1
-
-  -- Copy field definitions and populate with data
   local field_defs = form_type == "event" and event_fields or task_fields
-  state.fields = {}
+  local fields = {}
+
   for _, def in ipairs(field_defs) do
     local field = vim.tbl_extend("force", {}, def)
-    -- Populate with data
     if data[field.name] then
       field.value = data[field.name]
     end
     -- For calendar field in view mode, just show the value
     if field.name == "calendar" then
-      field.type = nil  -- Not a select in view mode
+      field.type = nil
       field.value = data.calendar or "(unknown)"
     end
-    table.insert(state.fields, field)
+    table.insert(fields, field)
   end
 
   -- Add status field for tasks
   if form_type == "task" and data.status then
-    table.insert(state.fields, {
+    table.insert(fields, {
       name = "status",
       label = "Status",
       value = data.status,
@@ -638,60 +726,21 @@ function M.open_view(form_type, data)
     })
   end
 
-  -- Create buffer
-  state.buf = vim.api.nvim_create_buf(false, true)
-  vim.bo[state.buf].buftype = "nofile"
-  vim.bo[state.buf].bufhidden = "wipe"
-  vim.bo[state.buf].swapfile = false
-  vim.bo[state.buf].filetype = "ical-form"
-
-  -- Calculate window size based on content
-  local width = 83
-  local content_height = 2  -- Footer only
-  for _, field in ipairs(state.fields) do
-    if field.multiline then
-      content_height = content_height + 1 + (field.lines or 3) + 1
-    else
-      content_height = content_height + 3
-    end
-  end
-  local height = content_height
-  local ui = vim.api.nvim_list_uis()[1]
-  local row = math.floor((ui.height - height) / 2)
-  local col = math.floor((ui.width - width) / 2)
-
-  -- Store position
-  state.win_row = row
-  state.win_col = col
-  state.win_width = width
-  state.win_height = height
-
-  -- Create window
   local title = form_type == "event" and " Event Details " or " Task Details "
-  state.win = vim.api.nvim_open_win(state.buf, true, {
-    relative = "editor",
-    width = width,
-    height = height,
-    row = row,
-    col = col,
-    style = "minimal",
-    border = "rounded",
-    title = title,
-    title_pos = "center",
-  })
+  show_form_window(title, fields, nil)
+end
 
-  vim.wo[state.win].cursorline = false
-  vim.wo[state.win].wrap = true
-  vim.wo[state.win].list = false
-
-  -- Render form (view-only)
-  render_form()
-
-  -- Setup view-only keymaps (just close)
-  local buf = state.buf
-  vim.keymap.set("n", "q", M.close, { buffer = buf, silent = true })
-  vim.keymap.set("n", "<Esc>", M.close, { buffer = buf, silent = true })
-  vim.keymap.set("n", "<CR>", M.close, { buffer = buf, silent = true })
+--- Open an editable form pre-filled with existing item data
+---@param form_type string "event" or "task"
+---@param data table Pre-filled data
+---@param calendars table[] Available calendars
+---@param on_save function Callback with updated form data
+function M.open_edit(form_type, data, calendars, on_save)
+  state.form_type = form_type
+  local field_defs = form_type == "event" and event_fields or task_fields
+  local fields = init_fields(field_defs, calendars, data)
+  local title = form_type == "event" and " Edit Event " or " Edit Task "
+  show_form_window(title, fields, on_save)
 end
 
 return M

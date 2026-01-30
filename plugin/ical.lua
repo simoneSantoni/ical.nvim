@@ -16,33 +16,12 @@ local function ensure_setup()
 end
 
 -- View commands
-vim.api.nvim_create_user_command("IcalAgenda", function(opts)
+vim.api.nvim_create_user_command("IcalAgenda", function()
   local ical = ensure_setup()
-  local view = opts.args ~= "" and opts.args or nil
-  ical.open_agenda({ view = view })
+  ical.open_agenda()
 end, {
   desc = "Open iCal agenda view",
-  nargs = "?",
-  complete = function()
-    return { "agenda", "daily", "weekly", "monthly", "yearly" }
-  end,
 })
-
-vim.api.nvim_create_user_command("IcalDaily", function()
-  ensure_setup().open_agenda({ view = "daily" })
-end, { desc = "Open iCal daily view" })
-
-vim.api.nvim_create_user_command("IcalWeekly", function()
-  ensure_setup().open_agenda({ view = "weekly" })
-end, { desc = "Open iCal weekly view" })
-
-vim.api.nvim_create_user_command("IcalMonthly", function()
-  ensure_setup().open_agenda({ view = "monthly" })
-end, { desc = "Open iCal monthly view" })
-
-vim.api.nvim_create_user_command("IcalYearly", function()
-  ensure_setup().open_agenda({ view = "yearly" })
-end, { desc = "Open iCal yearly view" })
 
 vim.api.nvim_create_user_command("IcalAgendaRefresh", function()
   ensure_setup().refresh()

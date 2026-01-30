@@ -13,8 +13,7 @@ CONTENTS                                              *ical-contents*
     5. Keymaps ................................. |ical-keymaps|
     6. Configuration ........................... |ical-configuration|
     7. Calendar Sources ........................ |ical-sources|
-    8. Views ................................... |ical-views|
-    9. API ..................................... |ical-api|
+    8. API ..................................... |ical-api|
 
 ==============================================================================
 1. INTRODUCTION                                   *ical-introduction*
@@ -24,8 +23,10 @@ local .ics and .ical files. It supports:
 
 - Multiple calendar sources (files, directories, git repos)
 - Recurring events (RRULE)
-- Tasks/todos (VTODO)
-- Multiple view modes (agenda, daily, weekly, monthly, yearly)
+- Tasks/todos (VTODO) with tags
+- Agenda view with 2/3 events + 1/3 tasks layout
+- Inline editing of events and tasks
+- Description preview for selected events
 - Integration with calendar.vim
 
 Perfect for viewing calendars from:
@@ -48,7 +49,7 @@ Perfect for viewing calendars from:
 2. Open the agenda: >vim
     :IcalAgenda
 <
-3. Navigate with `h`/`l` or `<`/`>`, switch views with `a`/`d`/`w`/`m`/`y`
+3. Navigate with `h`/`l` or `<`/`>`, press Enter to edit an item
 
 For persistent configuration, add calendars in your config:
 >lua
@@ -65,21 +66,8 @@ For persistent configuration, add calendars in your config:
 
 View Commands ~
 
-:IcalAgenda [view]                                            *:IcalAgenda*
-    Open the agenda view. Optional [view] argument:
-    `agenda`, `daily`, `weekly`, `monthly`, `yearly`
-
-:IcalDaily                                                      *:IcalDaily*
-    Open the daily view directly.
-
-:IcalWeekly                                                    *:IcalWeekly*
-    Open the weekly view directly.
-
-:IcalMonthly                                                  *:IcalMonthly*
-    Open the monthly view directly.
-
-:IcalYearly                                                    *:IcalYearly*
-    Open the yearly view directly.
+:IcalAgenda                                                  *:IcalAgenda*
+    Open the agenda view.
 
 :IcalAgendaRefresh                                      *:IcalAgendaRefresh*
     Refresh the current agenda view.
@@ -123,8 +111,9 @@ Event/Task Creation Commands ~
 
 :IcalNewTask                                                  *:IcalNewTask*
     Open a popup form to create a new task/todo.
-    Fields: Title, Due Date, Due Time, Priority, Description, Calendar
+    Fields: Title, Due Date, Due Time, Priority, Tags, Description, Calendar
 
+    Tags are comma-separated values stored as iCal CATEGORIES.
     Tasks are saved as individual .ics files with UUID filenames.
 
 ==============================================================================
@@ -133,30 +122,29 @@ Event/Task Creation Commands ~
 Default keymaps in the agenda buffer:
 
 Navigation ~
-    `h` or `<`      Navigate to previous period
-    `l` or `>`      Navigate to next period
+    `h` or `<`      Navigate to previous week
+    `l` or `>`      Navigate to next week
     `t`             Go to today
-
-View Modes ~
-    `a`             Switch to agenda (list) view
-    `d`             Switch to daily view
-    `w`             Switch to weekly view
-    `m`             Switch to monthly view
-    `y`             Switch to yearly view
 
 Actions ~
     `r`             Refresh the view
     `T`             Toggle tasks sidebar
     `c`             Open calendar.vim
-    `n` or `e`      Create new event (opens form)
+    `n`             Create new event (opens form)
     `N`             Create new task (opens form)
+    `<CR>`          Edit event/task under cursor
+    `x`             Mark task under cursor as completed
     `q` or `<Esc>`  Close agenda
+
+Description Preview ~
+    Moving the cursor over an event line automatically shows its
+    description in the lower section of the agenda buffer.
 
 Event/Task Form ~
     `j` / `k`       Navigate between fields
     `<CR>` or `e`   Edit current field
     `<Tab>`         Cycle select options / Next field
-    `S` or `<C-s>`  Save and create
+    `S` or `<C-s>`  Save and create/update
     `q` or `<Esc>`  Cancel
 
 Text Input Fields ~
@@ -167,18 +155,6 @@ Description Field (Multiline) ~
     `<CR>`          Insert new line
     `<C-s>`         Save description
     `<Esc>`         Cancel input
-
-In calendar.vim buffer ~
-    `a`             Open iCal Agenda
-
-Global keymaps (default) ~
-    `<leader>ca`    Open iCal Agenda
-    `<leader>cd`    Open Daily view
-    `<leader>cW`    Open Weekly view
-    `<leader>cm`    Open Monthly view
-    `<leader>ce`    Create new event
-    `<leader>ct`    Create new task
-    `<leader>cc`    Open calendar.vim
 
 ==============================================================================
 6. CONFIGURATION                                  *ical-configuration*
@@ -213,8 +189,6 @@ Configure in your lazy.nvim plugin spec:
         keymaps = {
           close = { "q", "<Esc>" },
           refresh = "r",
-          next_week = "<C-d>",       -- Legacy, use h/l now
-          prev_week = "<C-u>",
           goto_today = "t",
           toggle_tasks = "T",
           open_calendar = "c",
@@ -291,34 +265,7 @@ Git-synced calendar repo: >lua
     { name = "Shared", path = "~/repos/team-calendar", recursive = true }
 <
 ==============================================================================
-8. VIEWS                                                  *ical-views*
-
-Agenda View (default) ~
-    List of upcoming events grouped by date.
-    Shows events for the next `days_ahead` days.
-    Navigate by week with `h`/`l`.
-
-Daily View ~
-    Single day view with hourly timeline.
-    All-day events shown separately.
-    Navigate by day with `h`/`l`.
-
-Weekly View ~
-    7-day view starting from Monday.
-    Shows each day with its events.
-    Navigate by week with `h`/`l`.
-
-Monthly View ~
-    Calendar grid for the month.
-    Days with events marked with `*`.
-    Navigate by month with `h`/`l`.
-
-Yearly View ~
-    12-month overview showing event counts.
-    Navigate by year with `h`/`l`.
-
-==============================================================================
-9. API                                                      *ical-api*
+8. API                                                      *ical-api*
 
 Lua API for programmatic access:
 
@@ -327,16 +274,11 @@ Lua API for programmatic access:
 
     -- Open agenda
     ical.open_agenda()
-    ical.open_agenda({ view = "weekly" })
 
     -- Navigation
-    ical.navigate(1)    -- Next period
-    ical.navigate(-1)   -- Previous period
+    ical.navigate(1)    -- Next week
+    ical.navigate(-1)   -- Previous week
     ical.goto_today()
-
-    -- View modes
-    ical.set_view_mode("daily")
-    ical.set_view_mode(ical.VIEW_MODES.WEEKLY)
 
     -- Calendar management
     ical.add_calendar({
@@ -353,19 +295,14 @@ Lua API for programmatic access:
     ical.new_event()  -- Opens event form
     ical.new_task()   -- Opens task form
 
+    -- Edit item at cursor
+    ical.edit_item()  -- Opens editable form
+
     -- Refresh
     ical.refresh()
 
     -- Load raw data
     local events, todos = ical.load_calendars()
-<
-VIEW_MODES ~
->lua
-    ical.VIEW_MODES.AGENDA   -- "agenda"
-    ical.VIEW_MODES.DAILY    -- "daily"
-    ical.VIEW_MODES.WEEKLY   -- "weekly"
-    ical.VIEW_MODES.MONTHLY  -- "monthly"
-    ical.VIEW_MODES.YEARLY   -- "yearly"
 <
 ==============================================================================
 vim:tw=78:ts=8:ft=help:norl:

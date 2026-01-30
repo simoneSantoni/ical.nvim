@@ -21,9 +21,6 @@ M.config = {}
 -- Track initialization
 M._initialized = false
 
--- Re-export VIEW_MODES for external use
-M.VIEW_MODES = ui.VIEW_MODES
-
 --- Setup the plugin
 ---@param opts table|nil User configuration
 function M.setup(opts)
@@ -63,10 +60,12 @@ function M.load_calendars()
     local events, todos = parser.parse_directory(cal.path, cal)
 
     for _, event in ipairs(events) do
+      event.calendar_name = cal.name
       table.insert(all_events, event)
     end
 
     for _, todo in ipairs(todos) do
+      todo.calendar_name = cal.name
       table.insert(all_todos, todo)
     end
   end
@@ -74,50 +73,20 @@ function M.load_calendars()
   return all_events, all_todos
 end
 
---- Calculate the date range based on current view mode
+--- Calculate the date range for the agenda view
 ---@return number start_date Start of range (timestamp)
 ---@return number end_date End of range (timestamp)
 function M.get_date_range()
-  local view_mode = ui.get_view_mode()
-  local view_date = ui.get_view_date()
   local today = utils.start_of_day(os.time())
+  local start_date
 
-  local start_date, end_date
-
-  if view_mode == ui.VIEW_MODES.AGENDA then
-    -- Agenda: configurable days ahead from today
-    if M.config.display.show_past_events then
-      start_date = utils.add_days(today, -7)
-    else
-      start_date = today
-    end
-    end_date = utils.add_days(start_date, M.config.display.days_ahead)
-  elseif view_mode == ui.VIEW_MODES.DAILY then
-    -- Daily: single day
-    start_date = utils.start_of_day(view_date)
-    end_date = utils.end_of_day(view_date)
-  elseif view_mode == ui.VIEW_MODES.WEEKLY then
-    -- Weekly: 7 days starting from Monday of the view week
-    local dow = utils.day_of_week(view_date)
-    start_date = utils.add_days(utils.start_of_day(view_date), 1 - dow)
-    end_date = utils.add_days(start_date, 7) - 1
-  elseif view_mode == ui.VIEW_MODES.MONTHLY then
-    -- Monthly: entire month
-    local date_parts = os.date("*t", view_date)
-    start_date = os.time({ year = date_parts.year, month = date_parts.month, day = 1, hour = 0, min = 0, sec = 0 })
-    -- Last day of month
-    end_date = os.time({ year = date_parts.year, month = date_parts.month + 1, day = 0, hour = 23, min = 59, sec = 59 })
-  elseif view_mode == ui.VIEW_MODES.YEARLY then
-    -- Yearly: entire year
-    local year = os.date("*t", view_date).year
-    start_date = os.time({ year = year, month = 1, day = 1, hour = 0, min = 0, sec = 0 })
-    end_date = os.time({ year = year, month = 12, day = 31, hour = 23, min = 59, sec = 59 })
+  if M.config.display.show_past_events then
+    start_date = utils.add_days(today, -7)
   else
-    -- Default fallback
     start_date = today
-    end_date = utils.add_days(today, M.config.display.days_ahead)
   end
 
+  local end_date = utils.add_days(start_date, M.config.display.days_ahead)
   return start_date, end_date
 end
 
@@ -134,17 +103,15 @@ function M.expand_events(events, start_date, end_date)
 
   for _, event in ipairs(events) do
     if event.rrule and ok then
-      -- Expand recurring event
+      -- Expand recurring event within range (recurrences need bounds)
       local instances = rrule.expand(event, start_date, end_date)
       for _, instance in ipairs(instances) do
         table.insert(expanded, instance)
       end
     else
-      -- Non-recurring: include if within range
-      if event.dtstart <= end_date and event.dtstart >= start_date then
-        table.insert(expanded, event)
-      elseif event.dtend >= start_date and event.dtstart <= end_date then
-        -- Event spans into our range
+      -- Non-recurring: include if today or future
+      local today = utils.start_of_day(os.time())
+      if event.dtstart >= today or (event.dtend and event.dtend >= today) then
         table.insert(expanded, event)
       end
     end
@@ -199,32 +166,11 @@ function M.filter_tasks(todos)
   return filtered
 end
 
---- Navigate the view by the appropriate unit for the current mode
+--- Navigate the agenda by weeks
 ---@param direction number 1 for next, -1 for previous
 function M.navigate(direction)
-  local view_mode = ui.get_view_mode()
   local view_date = ui.get_view_date()
-
-  if view_mode == ui.VIEW_MODES.AGENDA then
-    -- Agenda: navigate by weeks
-    ui.set_view_date(utils.add_days(view_date, direction * 7))
-  elseif view_mode == ui.VIEW_MODES.DAILY then
-    -- Daily: navigate by days
-    ui.set_view_date(utils.add_days(view_date, direction))
-  elseif view_mode == ui.VIEW_MODES.WEEKLY then
-    -- Weekly: navigate by weeks
-    ui.set_view_date(utils.add_days(view_date, direction * 7))
-  elseif view_mode == ui.VIEW_MODES.MONTHLY then
-    -- Monthly: navigate by months
-    local date_parts = os.date("*t", view_date)
-    date_parts.month = date_parts.month + direction
-    ui.set_view_date(os.time(date_parts))
-  elseif view_mode == ui.VIEW_MODES.YEARLY then
-    -- Yearly: navigate by years
-    local date_parts = os.date("*t", view_date)
-    date_parts.year = date_parts.year + direction
-    ui.set_view_date(os.time(date_parts))
-  end
+  ui.set_view_date(utils.add_days(view_date, direction * 7))
 
   if ui.is_open() then
     M.refresh()
@@ -239,24 +185,10 @@ function M.goto_today()
   end
 end
 
---- Set view mode and refresh
----@param mode string One of VIEW_MODES
-function M.set_view_mode(mode)
-  ui.set_view_mode(mode)
-  if ui.is_open() then
-    M.refresh()
-  end
-end
-
 --- Open the agenda view
----@param opts table|nil Optional override options (e.g., { view = "weekly" })
+---@param opts table|nil Optional override options
 function M.open_agenda(opts)
   opts = opts or {}
-
-  -- Set initial view mode if specified
-  if opts.view then
-    ui.set_view_mode(opts.view)
-  end
 
   -- Reset view date to today
   ui.set_view_date(utils.start_of_day(os.time()))
@@ -268,7 +200,7 @@ end
 function M.refresh()
   local events, todos = M.load_calendars()
 
-  -- Calculate date range based on view mode
+  -- Calculate date range
   local start_date, end_date = M.get_date_range()
 
   -- Expand recurring events
@@ -317,22 +249,6 @@ function M.refresh()
       ui.close_window()
       vim.cmd("Calendar")
     end,
-    -- View mode callbacks
-    view_agenda = function()
-      M.set_view_mode(ui.VIEW_MODES.AGENDA)
-    end,
-    view_daily = function()
-      M.set_view_mode(ui.VIEW_MODES.DAILY)
-    end,
-    view_weekly = function()
-      M.set_view_mode(ui.VIEW_MODES.WEEKLY)
-    end,
-    view_monthly = function()
-      M.set_view_mode(ui.VIEW_MODES.MONTHLY)
-    end,
-    view_yearly = function()
-      M.set_view_mode(ui.VIEW_MODES.YEARLY)
-    end,
     -- Create new items
     new_event = function()
       M.new_event()
@@ -340,13 +256,17 @@ function M.refresh()
     new_task = function()
       M.new_task()
     end,
-    -- View item details
-    view_item = function()
-      M.view_item()
+    -- Edit item
+    edit_item = function()
+      M.edit_item()
     end,
     -- Complete task
     complete_task = function()
       M.complete_task()
+    end,
+    -- Delete item
+    delete_item = function()
+      M.delete_item()
     end,
   })
 end
@@ -510,10 +430,8 @@ local function generate_uuid()
 end
 
 --- Generate a filename for a new event/task
----@param summary string Event/task summary (unused, kept for API compatibility)
----@param item_type string "event" or "task" (unused, kept for API compatibility)
 ---@return string filename
-local function generate_filename(summary, item_type)
+local function generate_filename()
   return generate_uuid() .. ".ics"
 end
 
@@ -565,7 +483,7 @@ function M.new_event(opts)
     local content = form_module.create_vevent(data)
 
     -- Generate filename and save
-    local filename = generate_filename(data.summary, "event")
+    local filename = generate_filename()
     local ok, err = save_ical_file(write_path, filename, content)
 
     if ok then
@@ -604,7 +522,7 @@ function M.new_task(opts)
     local content = form_module.create_vtodo(data)
 
     -- Generate filename and save
-    local filename = generate_filename(data.summary, "task")
+    local filename = generate_filename()
     local ok, err = save_ical_file(write_path, filename, content)
 
     if ok then
@@ -619,8 +537,8 @@ function M.new_task(opts)
   end)
 end
 
---- View details of event/task at cursor
-function M.view_item()
+--- Edit event/task at cursor — opens an editable form, saves back to .ics file
+function M.edit_item()
   local item, item_type = ui.get_item_at_cursor()
   if not item then
     return
@@ -629,7 +547,6 @@ function M.view_item()
   local form_module = get_form()
 
   if item_type == "event" then
-    -- Prepare event data for display
     local data = {
       summary = item.summary or "",
       date = item.dtstart and os.date("%Y-%m-%d", item.dtstart) or "",
@@ -639,20 +556,99 @@ function M.view_item()
       description = item.description or "",
       calendar = item.calendar_name or "",
     }
-    form_module.open_view("event", data)
+
+    form_module.open_edit("event", data, M.config.calendars, function(updated)
+      -- Write the updated event back to the source file
+      local source_file = item.source_file
+      if not source_file then
+        vim.notify("ical: cannot find source file for this event", vim.log.levels.ERROR)
+        return
+      end
+
+      local content = form_module.create_vevent(updated)
+      local file, err = io.open(source_file, "w")
+      if not file then
+        vim.notify("ical: failed to save: " .. (err or "unknown"), vim.log.levels.ERROR)
+        return
+      end
+      file:write(content)
+      file:close()
+
+      vim.notify("ical: updated event '" .. updated.summary .. "'", vim.log.levels.INFO)
+      if ui.is_open() then
+        M.refresh()
+      end
+    end)
   else
-    -- Prepare task data for display
     local data = {
       summary = item.summary or "",
       due_date = item.due and os.date("%Y-%m-%d", item.due) or "",
       due_time = item.due and os.date("%H:%M", item.due) or "",
       priority = item.priority and tostring(item.priority) or "0",
       description = item.description or "",
+      tags = item.categories and table.concat(item.categories, ", ") or "",
       calendar = item.calendar_name or "",
-      status = item.status or "NEEDS-ACTION",
+      status = form_module.ical_to_display_status(item.status or "NEEDS-ACTION"),
     }
-    form_module.open_view("task", data)
+
+    form_module.open_edit("task", data, M.config.calendars, function(updated)
+      -- Write the updated task back to the source file
+      local source_file = item.source_file
+      if not source_file then
+        vim.notify("ical: cannot find source file for this task", vim.log.levels.ERROR)
+        return
+      end
+
+      local content = form_module.create_vtodo(updated)
+      local file, err = io.open(source_file, "w")
+      if not file then
+        vim.notify("ical: failed to save: " .. (err or "unknown"), vim.log.levels.ERROR)
+        return
+      end
+      file:write(content)
+      file:close()
+
+      vim.notify("ical: updated task '" .. updated.summary .. "'", vim.log.levels.INFO)
+      if ui.is_open() then
+        M.refresh()
+      end
+    end)
   end
+end
+
+--- Delete event/task at cursor (with confirmation)
+function M.delete_item()
+  local item, item_type = ui.get_item_at_cursor()
+  if not item then
+    vim.notify("ical: no item under cursor", vim.log.levels.WARN)
+    return
+  end
+
+  local source_file = item.source_file
+  if not source_file or vim.fn.filereadable(source_file) ~= 1 then
+    vim.notify("ical: cannot find source file for this item", vim.log.levels.ERROR)
+    return
+  end
+
+  local label = item_type == "event" and "event" or "task"
+  vim.ui.select({ "Yes", "No" }, {
+    prompt = "Delete " .. label .. " '" .. item.summary .. "'?",
+  }, function(choice)
+    if choice ~= "Yes" then
+      return
+    end
+
+    local ok, err = os.remove(source_file)
+    if not ok then
+      vim.notify("ical: failed to delete: " .. (err or "unknown error"), vim.log.levels.ERROR)
+      return
+    end
+
+    vim.notify("ical: deleted " .. label .. " '" .. item.summary .. "'", vim.log.levels.INFO)
+    if ui.is_open() then
+      M.refresh()
+    end
+  end)
 end
 
 --- Mark task at cursor as completed
