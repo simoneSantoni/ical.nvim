@@ -97,3 +97,10 @@ end, { desc = "Create a new calendar event" })
 vim.api.nvim_create_user_command("IcalNewTask", function()
   ensure_setup().new_task()
 end, { desc = "Create a new task/todo" })
+
+-- Sync to calendar.vim
+vim.api.nvim_create_user_command("IcalSync", function()
+  local ical = ensure_setup()
+  local bridge = require("ical.bridge")
+  bridge.sync(ical.config)
+end, { desc = "Sync ical events to calendar.vim cache" })
