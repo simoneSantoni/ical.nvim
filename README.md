@@ -7,9 +7,9 @@ A Neovim plugin for displaying and creating calendar events and tasks from local
 - **Multiple calendar sources** - files, directories, or git repos with recursive scanning
 - **Recurring events** - full RRULE support (daily, weekly, monthly, yearly)
 - **Tasks/Todos** - VTODO support with due dates and priorities
-- **Multiple views** - Agenda, Daily, Weekly, Monthly, Yearly
 - **Create events & tasks** - Popup form with multiline description support
 - **UUID filenames** - Events saved with unique identifiers
+- **calendar.vim integration** - Optional visual calendar sidebar
 
 ## Requirements
 
@@ -25,19 +25,11 @@ A Neovim plugin for displaying and creating calendar events and tasks from local
   "simoneSantoni/ical.nvim",
   cmd = {
     "IcalAgenda",
-    "IcalDaily",
-    "IcalWeekly",
-    "IcalMonthly",
-    "IcalYearly",
     "IcalNewEvent",
     "IcalNewTask",
   },
   keys = {
     { "<leader>ca", "<cmd>IcalAgenda<cr>", desc = "iCal Agenda" },
-    { "<leader>cd", "<cmd>IcalDaily<cr>", desc = "iCal Daily" },
-    { "<leader>cW", "<cmd>IcalWeekly<cr>", desc = "iCal Weekly" },
-    { "<leader>cM", "<cmd>IcalMonthly<cr>", desc = "iCal Monthly" },
-    { "<leader>cY", "<cmd>IcalYearly<cr>", desc = "iCal Yearly" },
     { "<leader>ce", "<cmd>IcalNewEvent<cr>", desc = "New Event" },
     { "<leader>ct", "<cmd>IcalNewTask<cr>", desc = "New Task" },
   },
@@ -62,21 +54,19 @@ A Neovim plugin for displaying and creating calendar events and tasks from local
    :IcalAgenda
    ```
 
-3. Navigate with `h`/`l`, switch views with `a`/`d`/`w`/`m`/`y`
+3. Navigate with `h`/`l`, edit items with `Enter`, manage tasks with `x`/`d`
 
 ## Commands
 
 | Command | Description |
 |---------|-------------|
-| `:IcalAgenda [view]` | Open agenda (optional: daily, weekly, monthly, yearly) |
-| `:IcalDaily` | Open daily view |
-| `:IcalWeekly` | Open weekly view |
-| `:IcalMonthly` | Open monthly view |
-| `:IcalYearly` | Open yearly view |
+| `:IcalAgenda` | Open agenda view |
+| `:IcalAgendaRefresh` | Refresh agenda data |
+| `:IcalAgendaClose` | Close agenda window |
 | `:IcalNewEvent` | Create new event |
 | `:IcalNewTask` | Create new task |
 | `:IcalAddCalendar {path} [name] [--recursive]` | Add calendar source |
-| `:IcalRemoveCalendar {name}` | Remove calendar source |
+| `:IcalRemoveCalendar {name}` | Remove calendar source by name or index |
 | `:IcalListCalendars` | List configured calendars |
 
 ## Keymaps
@@ -88,23 +78,22 @@ A Neovim plugin for displaying and creating calendar events and tasks from local
 | `h` / `<` | Previous period |
 | `l` / `>` | Next period |
 | `t` | Go to today |
-| `a` | Agenda view |
-| `d` | Daily view |
-| `w` | Weekly view |
-| `m` | Monthly view |
-| `y` | Yearly view |
 | `r` | Refresh |
-| `T` | Toggle tasks |
-| `n` / `e` | New event |
+| `T` | Toggle tasks sidebar |
+| `c` | Open calendar.vim |
+| `n` | New event |
 | `N` | New task |
-| `q` | Close |
+| `Enter` | Edit item at cursor |
+| `x` | Complete task at cursor |
+| `d` | Delete item at cursor |
+| `q` / `Esc` | Close |
 
 ### Event/Task Form
 
 | Key | Action |
 |-----|--------|
-| `j` / `k` | Navigate fields |
-| `Enter` | Edit field |
+| `j` / `k` / `Down` / `Up` | Navigate fields |
+| `Enter` / `e` | Edit field |
 | `Tab` | Cycle options / Next field |
 | `S` / `Ctrl+S` | Save |
 | `q` / `Esc` | Cancel |
@@ -115,7 +104,7 @@ A Neovim plugin for displaying and creating calendar events and tasks from local
 |-----|--------|
 | `Enter` | New line |
 | `Ctrl+S` | Save description |
-| `Esc` | Cancel |
+| `Esc` / `q` | Cancel |
 
 ## Configuration
 
@@ -128,21 +117,61 @@ opts = {
     { name = "Shared", path = "~/repos/calendar", color = "#98FB98", recursive = true },
   },
 
-  -- Display options
-  display = {
-    days_ahead = 14,
-    show_tasks = true,
-    show_completed_tasks = false,
-    date_format = "%a %b %d",
-    time_format = "%H:%M",
+  -- Window settings
+  window = {
+    width = 60,
+    title = " iCal Agenda ",
   },
 
-  -- Icons
+  -- Display options
+  display = {
+    date_format = "%a %b %d",
+    time_format = "%H:%M",
+    show_past_events = false,
+    days_ahead = 14,
+    group_by_date = true,
+    show_all_day = true,
+    show_tasks = true,
+    show_completed_tasks = false,
+    delete_completed_tasks = true,
+  },
+
+  -- Keymaps within the agenda window
+  keymaps = {
+    close = { "q", "<Esc>" },
+    refresh = "r",
+    goto_today = "t",
+    toggle_tasks = "T",
+    open_calendar = "c",
+  },
+
+  -- Highlight groups
+  highlights = {
+    date_header = "Title",
+    event_time = "Number",
+    event_title = "Normal",
+    event_location = "Comment",
+    today = "CursorLine",
+    task_pending = "Todo",
+    task_completed = "Comment",
+    overdue = "ErrorMsg",
+    calendar_color = "Special",
+  },
+
+  -- Auto-refresh settings
+  refresh = {
+    on_focus = false,
+    interval = 0,
+  },
+
+  -- Icons (set to empty strings to disable)
   icons = {
     event = "",
     task = "☐",
     task_done = "☑",
+    location = "@",
     recurring = "↻",
+    all_day = "◷",
   },
 }
 ```
