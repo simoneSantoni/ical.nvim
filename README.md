@@ -5,9 +5,11 @@ A Neovim plugin for displaying and creating calendar events and tasks from local
 ## Features
 
 - **Multiple calendar sources** - files, directories, or git repos with recursive scanning
-- **Recurring events** - full RRULE support (daily, weekly, monthly, yearly)
+- **Recurring events** - full RRULE support (daily, weekly, monthly, yearly) with human-readable pattern display
 - **Tasks/Todos** - VTODO support with due dates and priorities
-- **Create events & tasks** - Popup form with multiline description support
+- **Create events & tasks** - Popup form with vim-style keybindings
+- **HTML-aware summaries** - Automatically strips embedded HTML from event data
+- **Export & reports** - Export to .ics, generate markdown or CSV reports
 - **UUID filenames** - Events saved with unique identifiers
 - **calendar.vim integration** - Optional visual calendar sidebar
 
@@ -68,6 +70,9 @@ A Neovim plugin for displaying and creating calendar events and tasks from local
 | `:IcalAddCalendar {path} [name] [--recursive]` | Add calendar source |
 | `:IcalRemoveCalendar {name}` | Remove calendar source by name or index |
 | `:IcalListCalendars` | List configured calendars |
+| `:IcalExport [path]` | Export events and tasks as .ics file |
+| `:IcalReport [format] [path]` | Generate report (markdown or csv) |
+| `:IcalSync` | Sync events to calendar.vim cache |
 
 ## Keymaps
 
@@ -93,10 +98,12 @@ A Neovim plugin for displaying and creating calendar events and tasks from local
 | Key | Action |
 |-----|--------|
 | `j` / `k` / `Down` / `Up` | Navigate fields |
-| `Enter` / `e` | Edit field |
-| `Tab` | Cycle options / Next field |
-| `S` / `Ctrl+S` | Save |
-| `q` / `Esc` | Cancel |
+| `Ctrl+n` / `Ctrl+p` | Navigate fields (alternate) |
+| `gg` / `G` | Jump to first / last field |
+| `Enter` / `e` / `i` / `a` / `o` | Edit field |
+| `Tab` / `Shift+Tab` | Next / previous field |
+| `S` / `Ctrl+S` / `ZZ` | Save |
+| `q` / `Esc` / `ZQ` | Cancel |
 
 ### Description Field (Multiline)
 
@@ -152,8 +159,8 @@ opts = {
     event_title = "Normal",
     event_location = "Comment",
     today = "CursorLine",
-    task_pending = "Todo",
-    task_completed = "Comment",
+    task_pending = "WarningMsg",
+    task_completed = "DiagnosticOk",
     overdue = "ErrorMsg",
     calendar_color = "Special",
   },

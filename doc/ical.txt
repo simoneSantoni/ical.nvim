@@ -22,11 +22,13 @@ ical is a Neovim plugin for displaying calendar events and tasks from
 local .ics and .ical files. It supports:
 
 - Multiple calendar sources (files, directories, git repos)
-- Recurring events (RRULE)
+- Recurring events (RRULE) with human-readable pattern display
 - Tasks/todos (VTODO) with tags
 - Agenda view with 2/3 events + 1/3 tasks layout
-- Inline editing of events and tasks
-- Description preview for selected events
+- Inline editing of events and tasks with vim-style keybindings
+- Description preview for selected events (with recurrence info)
+- HTML-aware summaries (embedded HTML is stripped automatically)
+- Export to .ics files and report generation (Markdown, CSV)
 - Integration with calendar.vim
 
 Perfect for viewing calendars from:
@@ -116,6 +118,32 @@ Event/Task Creation Commands ~
     Tags are comma-separated values stored as iCal CATEGORIES.
     Tasks are saved as individual .ics files with UUID filenames.
 
+Export & Report Commands ~
+
+:IcalExport [path]                                            *:IcalExport*
+    Export the current agenda view (events and tasks) as a single .ics file.
+    If [path] is not provided, you will be prompted for a filename.
+
+    Examples: >vim
+        :IcalExport
+        :IcalExport ~/calendar-export.ics
+<
+:IcalReport [format] [path]                                    *:IcalReport*
+    Generate a report of the current agenda data.
+
+    [format]    Report format: "markdown" (default) or "csv"
+    [path]      Output file path (prompted if omitted)
+
+    The markdown report includes:
+    - Events table with date, time, location, and calendar
+    - Tasks table with status, due date, priority, and calendar
+    - Summary section with counts of pending/overdue/completed tasks
+
+    Examples: >vim
+        :IcalReport
+        :IcalReport csv ~/report.csv
+        :IcalReport markdown ~/report.md
+<
 ==============================================================================
 5. KEYMAPS                                              *ical-keymaps*
 
@@ -138,14 +166,22 @@ Actions ~
 
 Description Preview ~
     Moving the cursor over an event line automatically shows its
-    description in the lower section of the agenda buffer.
+    description in the lower section of the agenda buffer. For recurring
+    events, the recurrence pattern is displayed as a human-readable
+    description (e.g., "Every week on Monday, Wednesday, Friday").
 
 Event/Task Form ~
     `j` / `k`       Navigate between fields
-    `<CR>` or `e`   Edit current field
+    `<C-n>` / `<C-p>` Navigate between fields (alternate)
+    `gg`            Jump to first field
+    `G`             Jump to last field
+    `<CR>` / `e` / `i` / `a` / `o`   Edit current field
     `<Tab>`         Cycle select options / Next field
-    `S` or `<C-s>`  Save and create/update
-    `q` or `<Esc>`  Cancel
+    `<S-Tab>`       Previous field
+    `S` / `<C-s>`   Save and create/update
+    `ZZ`            Save and create/update (vim idiom)
+    `q` / `<Esc>`   Cancel
+    `ZQ`            Cancel (vim idiom)
 
 Text Input Fields ~
     `<CR>`          Save input (single-line fields)
@@ -211,8 +247,8 @@ Configure in your lazy.nvim plugin spec:
           event_title = "Normal",
           event_location = "Comment",
           today = "CursorLine",
-          task_pending = "Todo",
-          task_completed = "Comment",
+          task_pending = "WarningMsg",
+          task_completed = "DiagnosticOk",
           overdue = "ErrorMsg",
         },
 
@@ -300,6 +336,14 @@ Lua API for programmatic access:
 
     -- Refresh
     ical.refresh()
+
+    -- Export to .ics
+    ical.export_ics()                    -- Prompts for filename
+    ical.export_ics("~/export.ics")      -- Direct export
+
+    -- Generate reports
+    ical.generate_report("markdown")     -- Prompts for filename
+    ical.generate_report("csv", "~/report.csv")
 
     -- Load raw data
     local events, todos = ical.load_calendars()

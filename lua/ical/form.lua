@@ -90,7 +90,7 @@ local function format_ical_datetime(date, time)
   return string.format("%04d%02d%02d", year, month, day)
 end
 
---- Escape text for iCal format
+--- Escape text for iCal format (also exposed as M.escape_text)
 ---@param text string
 ---@return string
 local function escape_ical_text(text)
@@ -513,11 +513,24 @@ local function submit_form()
   end
 end
 
+--- Jump to a specific field by index
+---@param index number Field index (1-based)
+local function goto_field(index)
+  if index < 1 then
+    index = 1
+  elseif index > #state.fields then
+    index = #state.fields
+  end
+  state.current_field = index
+  render_form()
+end
+
 --- Setup keymaps for the form
 local function setup_keymaps()
   local buf = state.buf
   local opts = { buffer = buf, silent = true }
 
+  -- Navigation: j/k, arrows, Ctrl-n/Ctrl-p
   vim.keymap.set("n", "j", function()
     navigate_field(1)
   end, opts)
@@ -530,13 +543,43 @@ local function setup_keymaps()
   vim.keymap.set("n", "<Up>", function()
     navigate_field(-1)
   end, opts)
+  vim.keymap.set("n", "<C-n>", function()
+    navigate_field(1)
+  end, opts)
+  vim.keymap.set("n", "<C-p>", function()
+    navigate_field(-1)
+  end, opts)
+
+  -- Jump to first/last field (gg/G)
+  vim.keymap.set("n", "gg", function()
+    goto_field(1)
+  end, opts)
+  vim.keymap.set("n", "G", function()
+    goto_field(#state.fields)
+  end, opts)
+
+  -- Edit current field
   vim.keymap.set("n", "<CR>", edit_current_field, opts)
   vim.keymap.set("n", "e", edit_current_field, opts)
+  vim.keymap.set("n", "i", edit_current_field, opts)
+  vim.keymap.set("n", "a", edit_current_field, opts)
+  vim.keymap.set("n", "o", edit_current_field, opts)
+
+  -- Cycle select / next field
   vim.keymap.set("n", "<Tab>", cycle_select, opts)
+  vim.keymap.set("n", "<S-Tab>", function()
+    navigate_field(-1)
+  end, opts)
+
+  -- Submit form
   vim.keymap.set("n", "S", submit_form, opts)
   vim.keymap.set("n", "<C-s>", submit_form, opts)
+  vim.keymap.set("n", "ZZ", submit_form, opts)
+
+  -- Close form
   vim.keymap.set("n", "q", M.close, opts)
   vim.keymap.set("n", "<Esc>", M.close, opts)
+  vim.keymap.set("n", "ZQ", M.close, opts)
 end
 
 --- Initialize fields from field definitions, optionally pre-filling with data
@@ -728,6 +771,13 @@ function M.open_view(form_type, data)
 
   local title = form_type == "event" and " Event Details " or " Task Details "
   show_form_window(title, fields, nil)
+end
+
+--- Escape text for iCal format (public API)
+---@param text string
+---@return string
+function M.escape_text(text)
+  return escape_ical_text(text)
 end
 
 --- Open an editable form pre-filled with existing item data

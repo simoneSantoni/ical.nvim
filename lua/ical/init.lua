@@ -710,4 +710,255 @@ function M.complete_task()
   M.refresh()
 end
 
+--- Export current agenda events and tasks as a single .ics file
+---@param filepath string|nil Output file path (prompts if nil)
+function M.export_ics(filepath)
+  local form_module = get_form()
+
+  local function do_export(path)
+    path = vim.fn.expand(path)
+
+    -- Load current data
+    local events, todos = M.load_calendars()
+    local start_date, end_date = M.get_date_range()
+    local expanded_events = M.expand_events(events, start_date, end_date)
+    local filtered_tasks = M.filter_tasks(todos)
+
+    local lines = {
+      "BEGIN:VCALENDAR",
+      "VERSION:2.0",
+      "PRODID:-//ical.nvim//EN",
+      "X-WR-CALNAME:ical.nvim Export",
+    }
+
+    -- Export events
+    for _, event in ipairs(expanded_events) do
+      table.insert(lines, "BEGIN:VEVENT")
+      table.insert(lines, "UID:" .. (event.uid or "") .. "-export@ical.nvim")
+      table.insert(lines, "DTSTAMP:" .. os.date("!%Y%m%dT%H%M%SZ"))
+      table.insert(lines, "SUMMARY:" .. (event.summary or ""))
+      if event.all_day then
+        table.insert(lines, "DTSTART;VALUE=DATE:" .. os.date("%Y%m%d", event.dtstart))
+        table.insert(lines, "DTEND;VALUE=DATE:" .. os.date("%Y%m%d", event.dtend))
+      else
+        table.insert(lines, "DTSTART:" .. os.date("%Y%m%dT%H%M%S", event.dtstart))
+        table.insert(lines, "DTEND:" .. os.date("%Y%m%dT%H%M%S", event.dtend))
+      end
+      if event.location and event.location ~= "" then
+        table.insert(lines, "LOCATION:" .. form_module.escape_text(event.location))
+      end
+      if event.description and event.description ~= "" then
+        table.insert(lines, "DESCRIPTION:" .. form_module.escape_text(event.description))
+      end
+      if event.status and event.status ~= "" then
+        table.insert(lines, "STATUS:" .. event.status)
+      end
+      table.insert(lines, "END:VEVENT")
+    end
+
+    -- Export tasks
+    for _, task in ipairs(filtered_tasks) do
+      table.insert(lines, "BEGIN:VTODO")
+      table.insert(lines, "UID:" .. (task.uid or "") .. "-export@ical.nvim")
+      table.insert(lines, "DTSTAMP:" .. os.date("!%Y%m%dT%H%M%SZ"))
+      table.insert(lines, "SUMMARY:" .. (task.summary or ""))
+      if task.status then
+        table.insert(lines, "STATUS:" .. task.status)
+      end
+      if task.due then
+        table.insert(lines, "DUE:" .. os.date("%Y%m%dT%H%M%S", task.due))
+      end
+      if task.priority and task.priority > 0 then
+        table.insert(lines, "PRIORITY:" .. task.priority)
+      end
+      if task.description and task.description ~= "" then
+        table.insert(lines, "DESCRIPTION:" .. form_module.escape_text(task.description))
+      end
+      if task.categories and #task.categories > 0 then
+        table.insert(lines, "CATEGORIES:" .. table.concat(task.categories, ","))
+      end
+      table.insert(lines, "END:VTODO")
+    end
+
+    table.insert(lines, "END:VCALENDAR")
+
+    local content = table.concat(lines, "\r\n")
+    local file, err = io.open(path, "w")
+    if not file then
+      vim.notify("ical: failed to export: " .. (err or "unknown error"), vim.log.levels.ERROR)
+      return
+    end
+    file:write(content)
+    file:close()
+
+    local total = #expanded_events + #filtered_tasks
+    vim.notify(
+      "ical: exported " .. #expanded_events .. " events and " .. #filtered_tasks .. " tasks to " .. path,
+      vim.log.levels.INFO
+    )
+  end
+
+  if filepath and filepath ~= "" then
+    do_export(filepath)
+  else
+    vim.ui.input({ prompt = "Export .ics to: ", default = "ical-export.ics", completion = "file" }, function(input)
+      if input and input ~= "" then
+        do_export(input)
+      end
+    end)
+  end
+end
+
+--- Generate a report of events and tasks
+---@param format string "markdown" or "csv"
+---@param filepath string|nil Output file path (prompts if nil)
+function M.generate_report(format, filepath)
+  format = format or "markdown"
+
+  local function do_report(path)
+    path = vim.fn.expand(path)
+
+    -- Load current data
+    local events, todos = M.load_calendars()
+    local start_date, end_date = M.get_date_range()
+    local expanded_events = M.expand_events(events, start_date, end_date)
+    local filtered_tasks = M.filter_tasks(todos)
+
+    local content
+
+    if format == "csv" then
+      -- CSV report
+      local lines = {}
+      -- Events section
+      table.insert(lines, "Type,Summary,Date,Start Time,End Time,Location,Calendar,Status")
+      for _, event in ipairs(expanded_events) do
+        local date = os.date("%Y-%m-%d", event.dtstart)
+        local start_time = event.all_day and "All Day" or os.date("%H:%M", event.dtstart)
+        local end_time = event.all_day and "" or (event.dtend and os.date("%H:%M", event.dtend) or "")
+        local location = (event.location or ""):gsub('"', '""')
+        local summary = (event.summary or ""):gsub('"', '""')
+        local calendar = (event.calendar_name or event.calendar or ""):gsub('"', '""')
+        table.insert(lines, string.format(
+          'Event,"%s",%s,%s,%s,"%s","%s",%s',
+          summary, date, start_time, end_time, location, calendar, event.status or ""
+        ))
+      end
+      -- Tasks section
+      for _, task in ipairs(filtered_tasks) do
+        local due_date = task.due and os.date("%Y-%m-%d", task.due) or ""
+        local due_time = task.due and os.date("%H:%M", task.due) or ""
+        local summary = (task.summary or ""):gsub('"', '""')
+        local calendar = (task.calendar_name or task.calendar or ""):gsub('"', '""')
+        local status = task.status or "NEEDS-ACTION"
+        table.insert(lines, string.format(
+          'Task,"%s",%s,%s,,,,"%s",%s',
+          summary, due_date, due_time, calendar, status
+        ))
+      end
+      content = table.concat(lines, "\n")
+    else
+      -- Markdown report
+      local lines = {}
+      local date_range_str = os.date("%B %d, %Y", start_date) .. " - " .. os.date("%B %d, %Y", end_date)
+      table.insert(lines, "# iCal Report")
+      table.insert(lines, "")
+      table.insert(lines, "**Period:** " .. date_range_str)
+      table.insert(lines, "**Generated:** " .. os.date("%Y-%m-%d %H:%M"))
+      table.insert(lines, "")
+
+      -- Events section
+      table.insert(lines, "## Events (" .. #expanded_events .. ")")
+      table.insert(lines, "")
+
+      if #expanded_events > 0 then
+        table.insert(lines, "| Date | Time | Event | Location | Calendar |")
+        table.insert(lines, "|------|------|-------|----------|----------|")
+        for _, event in ipairs(expanded_events) do
+          local date = os.date("%Y-%m-%d", event.dtstart)
+          local time_str = event.all_day and "All Day" or os.date("%H:%M", event.dtstart)
+          local location = event.location or ""
+          local calendar = event.calendar_name or event.calendar or ""
+          table.insert(lines, string.format("| %s | %s | %s | %s | %s |",
+            date, time_str, event.summary or "", location, calendar))
+        end
+      else
+        table.insert(lines, "*No events in this period.*")
+      end
+      table.insert(lines, "")
+
+      -- Tasks section
+      table.insert(lines, "## Tasks (" .. #filtered_tasks .. ")")
+      table.insert(lines, "")
+
+      if #filtered_tasks > 0 then
+        table.insert(lines, "| Status | Task | Due Date | Priority | Calendar |")
+        table.insert(lines, "|--------|------|----------|----------|----------|")
+        for _, task in ipairs(filtered_tasks) do
+          local status_map = {
+            ["NEEDS-ACTION"] = "Pending",
+            ["IN-PROCESS"] = "In Progress",
+            ["COMPLETED"] = "Done",
+          }
+          local status = status_map[task.status] or task.status or "Pending"
+          local due = task.due and os.date("%Y-%m-%d", task.due) or "-"
+          local priority = task.priority and task.priority > 0 and tostring(task.priority) or "-"
+          local calendar = task.calendar_name or task.calendar or ""
+          table.insert(lines, string.format("| %s | %s | %s | %s | %s |",
+            status, task.summary or "", due, priority, calendar))
+        end
+      else
+        table.insert(lines, "*No tasks.*")
+      end
+      table.insert(lines, "")
+
+      -- Summary
+      local pending_count = 0
+      local completed_count = 0
+      local overdue_count = 0
+      local now = os.time()
+      for _, task in ipairs(filtered_tasks) do
+        if task.status == "COMPLETED" then
+          completed_count = completed_count + 1
+        elseif task.due and task.due < now then
+          overdue_count = overdue_count + 1
+        else
+          pending_count = pending_count + 1
+        end
+      end
+
+      table.insert(lines, "## Summary")
+      table.insert(lines, "")
+      table.insert(lines, "- **Total events:** " .. #expanded_events)
+      table.insert(lines, "- **Total tasks:** " .. #filtered_tasks)
+      table.insert(lines, "- **Pending tasks:** " .. pending_count)
+      table.insert(lines, "- **Overdue tasks:** " .. overdue_count)
+      table.insert(lines, "- **Completed tasks:** " .. completed_count)
+
+      content = table.concat(lines, "\n")
+    end
+
+    local file, err = io.open(path, "w")
+    if not file then
+      vim.notify("ical: failed to write report: " .. (err or "unknown error"), vim.log.levels.ERROR)
+      return
+    end
+    file:write(content)
+    file:close()
+
+    vim.notify("ical: report saved to " .. path, vim.log.levels.INFO)
+  end
+
+  if filepath and filepath ~= "" then
+    do_report(filepath)
+  else
+    local ext = format == "csv" and ".csv" or ".md"
+    local default_name = "ical-report" .. ext
+    vim.ui.input({ prompt = "Save report to: ", default = default_name, completion = "file" }, function(input)
+      if input and input ~= "" then
+        do_report(input)
+      end
+    end)
+  end
+end
+
 return M

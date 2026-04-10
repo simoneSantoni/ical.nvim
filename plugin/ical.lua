@@ -104,3 +104,36 @@ vim.api.nvim_create_user_command("IcalSync", function()
   local bridge = require("ical.bridge")
   bridge.sync(ical.config)
 end, { desc = "Sync ical events to calendar.vim cache" })
+
+-- Export events and tasks as .ics
+vim.api.nvim_create_user_command("IcalExport", function(opts)
+  local filepath = opts.args ~= "" and opts.args or nil
+  ensure_setup().export_ics(filepath)
+end, {
+  desc = "Export events and tasks as .ics file",
+  nargs = "?",
+  complete = "file",
+})
+
+-- Generate reports
+vim.api.nvim_create_user_command("IcalReport", function(opts)
+  local args = opts.fargs
+  local format = "markdown"
+  local filepath = nil
+
+  for _, arg in ipairs(args) do
+    if arg == "csv" or arg == "markdown" or arg == "md" then
+      format = arg == "md" and "markdown" or arg
+    else
+      filepath = arg
+    end
+  end
+
+  ensure_setup().generate_report(format, filepath)
+end, {
+  desc = "Generate a report (markdown|csv) [filepath]",
+  nargs = "*",
+  complete = function()
+    return { "markdown", "csv" }
+  end,
+})

@@ -2,10 +2,12 @@
 :IcalAgenda	ical.txt	/*:IcalAgenda*
 :IcalAgendaClose	ical.txt	/*:IcalAgendaClose*
 :IcalAgendaRefresh	ical.txt	/*:IcalAgendaRefresh*
+:IcalExport	ical.txt	/*:IcalExport*
 :IcalListCalendars	ical.txt	/*:IcalListCalendars*
 :IcalNewEvent	ical.txt	/*:IcalNewEvent*
 :IcalNewTask	ical.txt	/*:IcalNewTask*
 :IcalRemoveCalendar	ical.txt	/*:IcalRemoveCalendar*
+:IcalReport	ical.txt	/*:IcalReport*
 ical-api	ical.txt	/*ical-api*
 ical-commands	ical.txt	/*ical-commands*
 ical-configuration	ical.txt	/*ical-configuration*

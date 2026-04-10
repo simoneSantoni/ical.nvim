@@ -144,6 +144,38 @@ function M.next_weekday(timestamp, target_day)
   return M.add_days(timestamp, days_ahead)
 end
 
+--- Strip HTML tags and decode common HTML entities
+---@param text string Text possibly containing HTML
+---@return string Clean text
+function M.strip_html(text)
+  if not text then
+    return ""
+  end
+  -- Replace <br>, <br/>, <br /> with newlines
+  text = text:gsub("<br%s*/?>", "\n")
+  -- Replace <p> and </p> with newlines
+  text = text:gsub("</p>", "\n")
+  text = text:gsub("<p[^>]*>", "")
+  -- Replace block-level closing tags with newlines
+  text = text:gsub("</div>", "\n")
+  text = text:gsub("</li>", "\n")
+  -- Strip all remaining HTML tags
+  text = text:gsub("<[^>]+>", "")
+  -- Decode common HTML entities
+  text = text:gsub("&amp;", "&")
+  text = text:gsub("&lt;", "<")
+  text = text:gsub("&gt;", ">")
+  text = text:gsub("&quot;", '"')
+  text = text:gsub("&#39;", "'")
+  text = text:gsub("&apos;", "'")
+  text = text:gsub("&nbsp;", " ")
+  -- Collapse multiple blank lines
+  text = text:gsub("\n\n\n+", "\n\n")
+  -- Trim leading/trailing whitespace
+  text = text:match("^%s*(.-)%s*$") or text
+  return text
+end
+
 --- Decode iCal escaped text
 ---@param text string Escaped text
 ---@return string Decoded text
@@ -156,6 +188,8 @@ function M.decode_ical_text(text)
   text = text:gsub("\\,", ",")
   text = text:gsub("\\;", ";")
   text = text:gsub("\\\\", "\\")
+  -- Strip any embedded HTML
+  text = M.strip_html(text)
   return text
 end
 

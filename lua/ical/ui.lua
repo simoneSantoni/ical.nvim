@@ -147,20 +147,17 @@ function M.open_window(opts)
     state.view_date = utils.start_of_day(os.time())
   end
 
-  -- Create new tab
+  -- Create new tab and reuse its buffer (avoids orphaned "[No Name]" buffer)
   vim.cmd("tabnew")
   state.tab = vim.api.nvim_get_current_tabpage()
+  state.main_win = vim.api.nvim_get_current_win()
+  state.main_buf = vim.api.nvim_get_current_buf()
 
-  -- Create main buffer
-  state.main_buf = vim.api.nvim_create_buf(false, true)
+  -- Configure the buffer
   vim.bo[state.main_buf].buftype = "nofile"
   vim.bo[state.main_buf].bufhidden = "wipe"
   vim.bo[state.main_buf].swapfile = false
   vim.bo[state.main_buf].filetype = "ical"
-
-  -- Set the buffer in current window
-  state.main_win = vim.api.nvim_get_current_win()
-  vim.api.nvim_win_set_buf(state.main_win, state.main_buf)
 
   -- Window settings
   vim.wo[state.main_win].wrap = false
@@ -593,7 +590,8 @@ end
 
 --- Update the description preview pane content
 ---@param description string|nil The description to display
-local function update_description_preview(description)
+---@param item table|nil The event/task item (for recurrence info)
+local function update_description_preview(description, item)
   if not state.desc_buf or not vim.api.nvim_buf_is_valid(state.desc_buf) then
     return
   end
@@ -606,9 +604,22 @@ local function update_description_preview(description)
   local desc_lines = {}
   local desc_highlights = {}
 
+  -- Show recurrence info if the item is recurring
+  if item and item.rrule and item.rrule ~= "" then
+    local ok, rrule = pcall(require, "ical.rrule")
+    if ok then
+      local pattern = rrule.describe(item.rrule)
+      if pattern ~= "" then
+        table.insert(desc_lines, "Recurrence: " .. pattern)
+        table.insert(desc_highlights, { #desc_lines, 0, 11, "IcalAgendaDateHeader" })
+        table.insert(desc_lines, "")
+      end
+    end
+  end
+
   if description and description ~= "" then
     table.insert(desc_lines, "Description:")
-    table.insert(desc_highlights, { 1, 0, 12, "IcalAgendaDateHeader" })
+    table.insert(desc_highlights, { #desc_lines, 0, 12, "IcalAgendaDateHeader" })
 
     -- Word-wrap the description
     for paragraph in (description .. "\n"):gmatch("([^\n]*)\n") do
@@ -719,7 +730,7 @@ function M.render(events, tasks, opts, icons)
   end
 
   -- Initial description content
-  update_description_preview(nil)
+  update_description_preview(nil, nil)
 
   -- Render tasks sidebar
   if state.show_tasks then
@@ -744,11 +755,11 @@ function M.render(events, tasks, opts, icons)
       local cursor_line = cursor[1]
       local item_info = state.line_items[cursor_line]
 
-      -- Update description preview
+      -- Update description preview (including recurrence info)
       if item_info and item_info.item then
-        update_description_preview(item_info.item.description)
+        update_description_preview(item_info.item.description, item_info.item)
       else
-        update_description_preview(nil)
+        update_description_preview(nil, nil)
       end
 
       -- Update header month/year based on selected item
