@@ -859,10 +859,8 @@ function M.generate_report(format, filepath)
     else
       -- Markdown report
       local lines = {}
-      local date_range_str = os.date("%B %d, %Y", start_date) .. " - " .. os.date("%B %d, %Y", end_date)
       table.insert(lines, "# iCal Report")
       table.insert(lines, "")
-      table.insert(lines, "**Period:** " .. date_range_str)
       table.insert(lines, "**Generated:** " .. os.date("%Y-%m-%d %H:%M"))
       table.insert(lines, "")
 
