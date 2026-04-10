@@ -352,6 +352,87 @@ local function expand_yearly(event, rule, range_start, range_end)
   return instances
 end
 
+--- Convert a parsed RRULE to a human-readable description
+---@param rrule_str string Raw RRULE string
+---@return string Human-readable description
+function M.describe(rrule_str)
+  if not rrule_str or rrule_str == "" then
+    return ""
+  end
+
+  local rule = M.parse(rrule_str)
+  if not rule.freq then
+    return ""
+  end
+
+  local day_names = {
+    MO = "Monday", TU = "Tuesday", WE = "Wednesday",
+    TH = "Thursday", FR = "Friday", SA = "Saturday", SU = "Sunday",
+  }
+
+  local parts = {}
+
+  -- Frequency
+  if rule.freq == "DAILY" then
+    if rule.interval == 1 then
+      table.insert(parts, "Every day")
+    else
+      table.insert(parts, "Every " .. rule.interval .. " days")
+    end
+  elseif rule.freq == "WEEKLY" then
+    if rule.interval == 1 then
+      table.insert(parts, "Every week")
+    else
+      table.insert(parts, "Every " .. rule.interval .. " weeks")
+    end
+  elseif rule.freq == "MONTHLY" then
+    if rule.interval == 1 then
+      table.insert(parts, "Every month")
+    else
+      table.insert(parts, "Every " .. rule.interval .. " months")
+    end
+  elseif rule.freq == "YEARLY" then
+    if rule.interval == 1 then
+      table.insert(parts, "Every year")
+    else
+      table.insert(parts, "Every " .. rule.interval .. " years")
+    end
+  end
+
+  -- BYDAY
+  if #rule.byday > 0 then
+    local names = {}
+    for _, bd in ipairs(rule.byday) do
+      local name = day_names[bd.day] or bd.day
+      if bd.pos then
+        local ordinals = { [1] = "1st", [2] = "2nd", [3] = "3rd", [-1] = "last" }
+        local ord = ordinals[bd.pos] or tostring(bd.pos) .. "th"
+        name = ord .. " " .. name
+      end
+      table.insert(names, name)
+    end
+    table.insert(parts, "on " .. table.concat(names, ", "))
+  end
+
+  -- BYMONTHDAY
+  if #rule.bymonthday > 0 then
+    local days = {}
+    for _, d in ipairs(rule.bymonthday) do
+      table.insert(days, tostring(d))
+    end
+    table.insert(parts, "on day " .. table.concat(days, ", "))
+  end
+
+  -- UNTIL or COUNT
+  if rule.until_date then
+    table.insert(parts, "until " .. os.date("%b %d, %Y", rule.until_date))
+  elseif rule.count then
+    table.insert(parts, "(" .. rule.count .. " times)")
+  end
+
+  return table.concat(parts, " ")
+end
+
 --- Expand a recurring event into instances within a date range
 ---@param event table Event with rrule property
 ---@param range_start number Start of range (timestamp)
